@@ -6,7 +6,10 @@ import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import flutter_dotenv
 // --- app's screen imports ---
 import 'package:autofix/screens/login_screen.dart';
 import 'package:autofix/screens/register_screen.dart';
-import 'package:autofix/screens/vehicle_owner_map_screen.dart'; // Driver's map (formerly mechanic_map_screen.dart)
+import 'package:autofix/screens/profile_screen.dart'; // User Profile Screen
+import 'package:autofix/screens/splash_screen.dart'; // For initial loading/redirection
+import 'package:autofix/screens/vehicle_owner_map_screen.dart'; // Driver's map
+import 'package:autofix/screens/mechanic_dashboard_screen.dart'; // Mechanic's dedicated screen
 
 // --- Existing app screens ---
 import 'package:autofix/screens/ai_diagnosis_screen.dart';
@@ -41,6 +44,9 @@ Future<void> main() async {
   await Supabase.initialize(
     url: supabaseUrl,
     anonKey: supabaseAnonKey,
+    // Removed 'authFlowType: AuthFlowType.pkce' as it might not be supported
+    // by your current supabase_flutter package version.
+    // If you need PKCE, consider updating your supabase_flutter dependency.
   );
   supabase = Supabase.instance.client; // Get the client instance after initialization
 
@@ -69,7 +75,8 @@ class _MyAppState extends State<MyApp> {
 
       // Handle different authentication events
       if (event == AuthChangeEvent.signedIn || event == AuthChangeEvent.userUpdated) {
-        _fetchUserRole(session?.user.id); // Fetch role when user signs in or updates
+        // FIXED: Removed redundant null-aware operator on 'session'
+        _fetchUserRole(session!.user.id); // session is guaranteed non-null here
       } else if (event == AuthChangeEvent.signedOut) {
         _userRole.value = null; // Clear role on sign out
       }
@@ -92,21 +99,40 @@ class _MyAppState extends State<MyApp> {
           .eq('id', userId)
           .single(); // Use single() to expect one row
 
+      // FIXED: Removed unnecessary 'response != null' check
       if (response['role'] != null) {
         _userRole.value = response['role'] as String;
+        print('DEBUG: User role fetched: ${_userRole.value}');
       } else {
-        _userRole.value = null; // Profile found but no role, or no profile.
-        // This might happen if profiles table insert failed after auth.signUp
-        // Consider prompting the user to complete their profile or re-register.
-        print('User profile or role not found for user ID: $userId');
+        // If profile found but no role, or no profile at all, sign out.
+        print('User profile or role not found for user ID: $userId. Signing out.');
+        await supabase.auth.signOut(); // FORCE LOGOUT
+        _userRole.value = null;
+        snackbarKey.currentState?.showSnackBar(
+          const SnackBar(
+            content: Text('Your profile could not be loaded. Please register or complete your profile.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
       }
-    } catch (e) {
-      print('Error fetching user role: $e');
-      _userRole.value = null; // Set null on error
-      // Show a general error message if profile data can't be fetched
+    } on PostgrestException catch (e) {
+      print('ERROR: Error fetching user role (PostgrestException): ${e.message}');
+      // This is the "0 rows returned" error. Force logout.
+      await supabase.auth.signOut(); // FORCE LOGOUT
+      _userRole.value = null;
       snackbarKey.currentState?.showSnackBar(
         SnackBar(
-          content: Text('Error loading user data: ${e.toString()}'),
+          content: Text('Error loading user data: ${e.message}. Please try registering again.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } catch (e) {
+      print('ERROR: Unexpected error fetching user role: $e');
+      await supabase.auth.signOut(); // FORCE LOGOUT for any other error
+      _userRole.value = null;
+      snackbarKey.currentState?.showSnackBar(
+        SnackBar(
+          content: Text('An unexpected error occurred loading user data: ${e.toString()}. Please try again.'),
           backgroundColor: Colors.red,
         ),
       );
@@ -133,7 +159,7 @@ class _MyAppState extends State<MyApp> {
 
         // Existing routes:
         '/ai_diagnosis': (context) => const AiDiagnosisScreen(),
-        '/mechanic_map': (context) => const MechanicMapScreen(), // Will be driver's map
+        '/mechanic_map': (context) => const VehicleOwnerMapScreen(), // This is the driver's map
         '/offline_guide': (context) => const OfflineGuideScreen(),
         '/settings': (context) => const SettingsScreen(),
         '/terms_conditions': (context) => const TermsConditionsScreen(),
@@ -145,12 +171,14 @@ class _MyAppState extends State<MyApp> {
             return ValueListenableBuilder<String?>(
               valueListenable: _userRole,
               builder: (context, role, child) {
+                // If no user is authenticated, always go to login
                 if (supabase.auth.currentUser == null) {
-                  // If not logged in, go to login screen
                   return const LoginScreen();
                 } else {
-                  // If logged in, but role is still null (fetching or not found), show loading or a generic screen
+                  // If user is authenticated but role is still null (loading or error)
                   if (role == null) {
+                    // This state should now be very brief, as _fetchUserRole will sign out
+                    // if a profile is genuinely missing.
                     return const Scaffold(
                       body: Center(
                         child: CircularProgressIndicator(),
@@ -158,13 +186,13 @@ class _MyAppState extends State<MyApp> {
                     );
                   } else if (role == 'driver') {
                     // Navigate to the Vehicle Owner's Map Screen for drivers
-                    return const MechanicMapScreen(); // Renamed to VehicleOwnerMapScreen in its file
+                    return const VehicleOwnerMapScreen();
                   } else if (role == 'mechanic') {
                     // Navigate to the Mechanic's Dashboard for mechanics
                     return const MechanicDashboardScreen();
                   } else {
-                    // Fallback for unknown roles (shouldn't happen with proper setup)
-                    return const Text('Unknown User Role');
+                    // Fallback for unknown roles (shouldn't happen with proper registration)
+                    return const Text('Unknown User Role. Please contact support.');
                   }
                 }
               },
@@ -178,284 +206,6 @@ class _MyAppState extends State<MyApp> {
   }
 }
 
-
-// --- Placeholder Screens (will be implemented in separate files) ---
-
-// lib/screens/splash_screen.dart
-// A simple splash screen to determine initial routing
-class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
-
-  @override
-  State<SplashScreen> createState() => _SplashScreenState();
-}
-
-class _SplashScreenState extends State<SplashScreen> {
-  @override
-  void initState() {
-    super.initState();
-    _redirect();
-  }
-
-  Future<void> _redirect() async {
-    await Future.delayed(Duration.zero); // Allow widget to build
-    if (!mounted) {
-      return;
-    }
-    final session = supabase.auth.currentSession;
-    if (session == null) {
-      // No session, go to login
-      Navigator.of(context).pushReplacementNamed('/login');
-    } else {
-      // Session exists, go to the main app route which handles role-based redirection
-      Navigator.of(context).pushReplacementNamed('/');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return const Scaffold(
-      body: Center(
-        child: CircularProgressIndicator(),
-      ),
-    );
-  }
-}
-
-// lib/screens/profile_screen.dart (Initial Placeholder)
-// This screen will display user profile and include a logout button.
-class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key});
-
-  @override
-  State<ProfileScreen> createState() => _ProfileScreenState();
-}
-
-class _ProfileScreenState extends State<ProfileScreen> {
-  Map<String, dynamic>? _profileData;
-  bool _isLoading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _fetchProfile();
-  }
-
-  Future<void> _fetchProfile() async {
-    final user = supabase.auth.currentUser;
-    if (user == null) {
-      snackbarKey.currentState?.showSnackBar(
-        const SnackBar(content: Text('No authenticated user found.')),
-      );
-      if (mounted) Navigator.pushReplacementNamed(context, '/login');
-      return;
-    }
-
-    try {
-      final response = await supabase
-          .from('profiles')
-          .select('*') // Select all columns for the profile
-          .eq('id', user.id)
-          .single();
-
-      setState(() {
-        _profileData = response;
-        _isLoading = false;
-      });
-    } catch (e) {
-      print('Error fetching profile: $e');
-      snackbarKey.currentState?.showSnackBar(
-        SnackBar(content: Text('Failed to load profile data: ${e.toString()}')),
-      );
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
-
-  Future<void> _logout() async {
-    try {
-      await supabase.auth.signOut();
-      if (mounted) {
-        // Clear navigation stack and go to login
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (context) => const LoginScreen()),
-          (Route<dynamic> route) => false,
-        );
-      }
-    } catch (e) {
-      snackbarKey.currentState?.showSnackBar(
-        SnackBar(content: Text('Error logging out: ${e.toString()}')),
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('My Profile',
-            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
-        backgroundColor: const Color.fromARGB(233, 214, 251, 250),
-        centerTitle: true,
-        elevation: 1,
-      ),
-      drawer: const NavigationDrawer(), // Attach the NavigationDrawer
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _profileData == null
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Text('Profile data not found.'),
-                      const SizedBox(height: 20),
-                      ElevatedButton(
-                        onPressed: _fetchProfile,
-                        child: const Text('Retry Load Profile'),
-                      ),
-                      const SizedBox(height: 20),
-                      ElevatedButton(
-                        onPressed: _logout,
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                        child: const Text('Logout'),
-                      ),
-                    ],
-                  ),
-                )
-              : SingleChildScrollView(
-                  padding: const EdgeInsets.all(24.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Center(
-                        child: CircleAvatar(
-                          radius: 60,
-                          backgroundColor: Colors.blue,
-                          child: Icon(
-                            _profileData!['role'] == 'driver' ? Icons.directions_car : Icons.build,
-                            size: 70,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      _buildProfileField('Full Name', _profileData!['full_name'] ?? 'N/A'),
-                      _buildProfileField('Email', _profileData!['email'] ?? 'N/A'),
-                      _buildProfileField('Phone Number', _profileData!['phone_number'] ?? 'N/A'),
-                      _buildProfileField('Role', _profileData!['role'] ?? 'N/A'),
-                      // Add more profile fields as needed
-                      const SizedBox(height: 32),
-                      ElevatedButton(
-                        onPressed: () {
-                          // TODO: Implement profile editing logic here
-                          snackbarKey.currentState?.showSnackBar(
-                            const SnackBar(content: Text('Edit Profile functionality coming soon!')),
-                          );
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: const Text('Edit Profile', style: TextStyle(fontSize: 18, color: Colors.white)),
-                      ),
-                      const SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: _logout,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        child: const Text('Logout', style: TextStyle(fontSize: 18, color: Colors.white)),
-                      ),
-                    ],
-                  ),
-                ),
-    );
-  }
-
-  Widget _buildProfileField(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.blueGrey),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: const TextStyle(fontSize: 18, color: Colors.black87),
-          ),
-          const Divider(),
-        ],
-      ),
-    );
-  }
-}
-
-// lib/screens/vehicle_owner_map_screen.dart (Initial Placeholder)
-// This will be the main screen for vehicle owners showing mechanics on a map.
-class VehicleOwnerMapScreen extends StatelessWidget {
-  const VehicleOwnerMapScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Mechanics Near You',
-            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
-        backgroundColor: const Color.fromARGB(233, 214, 251, 250),
-        centerTitle: true,
-        elevation: 1,
-      ),
-      drawer: const NavigationDrawer(), // Attach the NavigationDrawer
-      body: const Center(
-        child: Text(
-          'Map with Mechanic Locations will go here for Vehicle Owners!',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 18, color: Colors.blueGrey),
-        ),
-      ),
-    );
-  }
-}
-
-// lib/screens/mechanic_dashboard_screen.dart (Initial Placeholder)
-// This will be the main screen for mechanics.
-class MechanicDashboardScreen extends StatelessWidget {
-  const MechanicDashboardScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Mechanic Dashboard',
-            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
-        backgroundColor: const Color.fromARGB(233, 214, 251, 250),
-        centerTitle: true,
-        elevation: 1,
-      ),
-      drawer: const NavigationDrawer(), // Attach the NavigationDrawer
-      body: const Center(
-        child: Text(
-          'Welcome, Mechanic! Your dashboard will be here.',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 18, color: Colors.blueGrey),
-        ),
-      ),
-    );
-  }
-}
 
 // NavigationDrawer widget, used across multiple screens for consistent navigation.
 class NavigationDrawer extends StatelessWidget {
@@ -490,15 +240,17 @@ class NavigationDrawer extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  isLoggedIn ? (user.email ?? 'Logged In User') : 'Guest User',
+                  // Use null-aware operator safely, as user is non-null if isLoggedIn is true
+                  isLoggedIn ? (user.email ?? 'Logged In User') : 'Guest User', 
                   style: const TextStyle(
                     color: Colors.blue,
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                if (isLoggedIn)
+                if (isLoggedIn) // Removed '&& user.id != null' as it's redundant
                   Text(
+                    // user is guaranteed non-null here due to 'isLoggedIn' check
                     'ID: ${user.id.substring(0, 8)}...', // Display truncated ID for debugging
                     style: const TextStyle(
                       color: Colors.blueGrey,
@@ -527,10 +279,10 @@ class NavigationDrawer extends StatelessWidget {
           ),
           ListTile(
             leading: const Icon(Icons.map, color: Colors.blue),
-            title: const Text('Mechanic Map'),
+            title: const Text('Mechanic Map'), // This will be the Driver's map
             onTap: () {
               Navigator.pop(context);
-              Navigator.pushReplacementNamed(context, '/mechanic_map');
+              Navigator.pushReplacementNamed(context, '/mechanic_map'); // Route to VehicleOwnerMapScreen
             },
           ),
           ListTile(
@@ -579,27 +331,21 @@ class NavigationDrawer extends StatelessWidget {
                 Navigator.pushNamed(context, '/profile');
               },
             ),
-            // The logout button is primarily on the Profile screen, but can be added here too.
-            // ListTile(
-            //   leading: const Icon(Icons.logout, color: Colors.blue),
-            //   title: const Text('Logout'),
-            //   onTap: () async {
-            //     try {
-            //       await supabase.auth.signOut();
-            //       if (context.mounted) {
-            //         Navigator.pushAndRemoveUntil(
-            //           context,
-            //           MaterialPageRoute(builder: (context) => const LoginScreen()),
-            //           (Route<dynamic> route) => false,
-            //         );
-            //       }
-            //     } catch (e) {
-            //       snackbarKey.currentState?.showSnackBar(
-            //         SnackBar(content: Text('Error logging out: ${e.toString()}')),
-            //       );
-            //     }
-            //   },
-            // ),
+            ListTile(
+              leading: const Icon(Icons.logout, color: Colors.red),
+              title: const Text('Logout'),
+              onTap: () async {
+                Navigator.pop(context); // Close the drawer
+                await supabase.auth.signOut();
+                // After logout, the onAuthStateChange listener will handle redirection to /login
+                snackbarKey.currentState?.showSnackBar(
+                  const SnackBar(
+                    content: Text('Logged out successfully.'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              },
+            ),
           ],
         ],
       ),

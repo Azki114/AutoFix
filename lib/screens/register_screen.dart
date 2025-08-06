@@ -1,11 +1,13 @@
 // lib/screens/register_screen.dart
+import 'dart:convert'; // For JSON decoding
 import 'package:flutter/material.dart';
 import 'package:autofix/main.dart' as app_nav;
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:geocoding/geocoding.dart';
+// import 'package:geocoding/geocoding.dart'; // Removed: No longer directly used for reverse geocoding
 import 'package:latlong2/latlong.dart';
 import 'package:autofix/screens/select_location_on_map_screen.dart';
 import 'package:autofix/screens/terms_conditions_screen.dart';
+import 'package:http/http.dart' as http; // NEW: Import http package for Nominatim
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -52,6 +54,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   LatLng? _mechanicLatitudeLongitude;
   bool _agreedToTerms = false;
   bool _isRegistering = false;
+  bool _isGeocodingAddress = false; // NEW: State for geocoding process
 
   @override
   void dispose() {
@@ -109,8 +112,57 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
+  // NEW: Function to get a human-readable address from coordinates using Nominatim API
+  Future<void> _getAddressFromNominatim(LatLng point) async {
+    setState(() {
+      _isGeocodingAddress = true; // Set geocoding loading state
+      _businessAddressController.text = 'Fetching address...';
+    });
+
+    final url = 'https://nominatim.openstreetmap.org/reverse?format=json&lat=${point.latitude}&lon=${point.longitude}';
+    // IMPORTANT: Add a User-Agent header as required by Nominatim's usage policy
+    // Replace 'your-app-name' and 'your-contact-info' with actual values.
+    final headers = {'User-Agent': 'AutoFixApp (your-contact-email@example.com)'};
+
+    try {
+      final response = await http.get(Uri.parse(url), headers: headers);
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data != null && data['display_name'] != null) {
+          final address = data['display_name'];
+          setState(() {
+            _businessAddressController.text = address;
+          });
+          print('DEBUG: Address found via Nominatim: $address');
+        } else {
+          setState(() {
+            _businessAddressController.text = 'No address found for this location.';
+            _showSnackBar('Address not found for selected coordinates. Please try another spot.', Colors.orange);
+          });
+          print('WARNING: Nominatim found no address for lat: ${point.latitude}, lon: ${point.longitude}');
+        }
+      } else {
+        setState(() {
+          _businessAddressController.text = 'Error fetching address.';
+          _showSnackBar('Server error fetching address: ${response.statusCode}', Colors.red);
+        });
+        print('ERROR: Nominatim API call failed with status: ${response.statusCode}');
+      }
+    } catch (e) {
+      setState(() {
+        _businessAddressController.text = 'Network error occurred.';
+        _showSnackBar('Network error fetching address: ${e.toString()}', Colors.red);
+      });
+      print('ERROR: Network or parsing error during Nominatim call: $e');
+    } finally {
+      setState(() {
+        _isGeocodingAddress = false; // Reset geocoding loading state
+      });
+    }
+  }
+
   Future<void> _registerAccount() async {
-    if (_isRegistering) return;
+    if (_isRegistering || _isGeocodingAddress) return; // Prevent taps during any loading state
 
     if (!_formKey.currentState!.validate()) {
       _showSnackBar('Please correct the errors in the form.', Colors.red);
@@ -129,6 +181,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _showSnackBar('Please select your business location on the map.', Colors.red);
       return;
     }
+
+    // Ensure address is resolved if mechanic
+    if (_selectedAccountType == AccountType.mechanic && _businessAddressController.text.contains('Fetching address') || _businessAddressController.text.contains('No address found')) {
+      _showSnackBar('Please wait for the address to be resolved or select a valid location.', Colors.red);
+      return;
+    }
+
 
     setState(() {
       _isRegistering = true;
@@ -229,10 +288,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
-  // ... (rest of your _resetForm and build methods remain the same)
   // Resets all form fields and selections
   void _resetForm() {
-    _formKey.currentState?.reset(); // Resets validators
+    _formKey.currentState?.reset();
     _fullNameController.clear();
     _emailController.clear();
     _phoneNumberController.clear();
@@ -258,7 +316,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _selectedPricingUnit = null;
       _agreedToTerms = false;
       _passwordVisible = false;
-      _mechanicLatitudeLongitude = null; // Reset map selection
+      _mechanicLatitudeLongitude = null;
+      _isGeocodingAddress = false; // Reset geocoding state
     });
   }
 
@@ -312,7 +371,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   if (value == null || value.isEmpty) {
                     return 'Please enter your phone number';
                   }
-                  // Basic validation for numbers and length (adjust regex as needed)
                   if (!RegExp(r'^\+?[0-9]{10,15}$').hasMatch(value)) {
                     return 'Please enter a valid phone number';
                   }
@@ -410,7 +468,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     Expanded(
                       child: GestureDetector(
                         onTap: () {
-                          // Navigate to the Terms and Conditions screen
                           Navigator.push(
                             context,
                             MaterialPageRoute(
@@ -430,7 +487,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
                 // Register Button
                 ElevatedButton(
-                  onPressed: _isRegistering ? null : _registerAccount, // Disable when registering
+                  onPressed: (_isRegistering || _isGeocodingAddress) ? null : _registerAccount, // Disable when registering or geocoding
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blue,
                     padding: const EdgeInsets.symmetric(vertical: 16),
@@ -439,7 +496,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                     elevation: 3,
                   ),
-                  child: _isRegistering
+                  child: (_isRegistering || _isGeocodingAddress)
                       ? const SizedBox(
                           width: 24,
                           height: 24,
@@ -466,7 +523,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     return TextFormField(
       controller: controller,
       keyboardType: keyboardType,
-      enabled: enabled, // Added enabled property
+      enabled: enabled,
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
@@ -639,7 +696,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           'Business Address (from map)',
           _mechanicLatitudeLongitude == null ? 'Select location on map below' : '', // Hint changes
           (value) {
-            if (value == null || value.isEmpty || _mechanicLatitudeLongitude == null) {
+            if (value == null || value.isEmpty || _mechanicLatitudeLongitude == null || _businessAddressController.text.contains('No address found')) {
               return 'Please select your business address on the map.';
             }
             return null;
@@ -649,14 +706,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
         const SizedBox(height: 8),
         ElevatedButton.icon(
           icon: const Icon(Icons.map, color: Colors.white),
-          label: const Text('Select on Map', style: TextStyle(color: Colors.white)),
-          onPressed: () async {
-            // Navigate to map screen and wait for result
+          label: _isGeocodingAddress
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 2,
+                  ),
+                )
+              : const Text('Select on Map', style: TextStyle(color: Colors.white)),
+          onPressed: _isGeocodingAddress ? null : () async {
             final LatLng? selectedLatLng = await Navigator.push(
               context,
               MaterialPageRoute(
                 builder: (context) => SelectLocationOnMapScreen(
-                  initialLocation: _mechanicLatitudeLongitude, // Pass current selection if any
+                  initialLocation: _mechanicLatitudeLongitude,
                 ),
               ),
             );
@@ -665,29 +730,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
               setState(() {
                 _mechanicLatitudeLongitude = selectedLatLng;
               });
-              // Reverse geocode the selected coordinates to display address in the text field
-              try {
-                List<Placemark> placemarks = await placemarkFromCoordinates(
-                  selectedLatLng.latitude,
-                  selectedLatLng.longitude,
-                );
-                if (placemarks.isNotEmpty) {
-                  final Placemark place = placemarks.first;
-                  _businessAddressController.text = [
-                    place.street,
-                    place.subLocality,
-                    place.locality,
-                    place.administrativeArea,
-                    place.country,
-                  ].where((element) => element != null && element.isNotEmpty).join(', ');
-                } else {
-                  _businessAddressController.text = 'Address not found for selected coordinates.';
-                  _showSnackBar('Address not found for selected coordinates. Please try another spot.', Colors.orange);
-                }
-              } catch (e) {
-                _businessAddressController.text = 'Error fetching address.';
-                _showSnackBar('Error fetching address for selected location: ${e.toString()}', Colors.red);
-              }
+              // Call Nominatim for reverse geocoding
+              await _getAddressFromNominatim(selectedLatLng);
             }
           },
           style: ElevatedButton.styleFrom(
