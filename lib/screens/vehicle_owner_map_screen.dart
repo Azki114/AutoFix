@@ -7,7 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart'; // Import Supabase
 import 'package:autofix/main.dart'; // To access the global 'supabase' client and 'snackbarKey'
 import 'package:geolocator/geolocator.dart'; // For fetching user's current location
 
-class VehicleOwnerMapScreen extends StatefulWidget { // Renamed class here
+class VehicleOwnerMapScreen extends StatefulWidget {
   const VehicleOwnerMapScreen({super.key});
 
   @override
@@ -15,30 +15,35 @@ class VehicleOwnerMapScreen extends StatefulWidget { // Renamed class here
 }
 
 class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
-  // Initial camera position for Manila, Philippines (example coordinates)
   static const LatLng _kDefaultManila = LatLng(14.5995, 120.9842);
-  LatLng _currentMapCenter = _kDefaultManila; // Tracks the center of the map view
+  LatLng _currentMapCenter = _kDefaultManila;
 
-  // MapController for controlling the map programmatically
   final MapController _mapController = MapController();
 
-  // List to store map markers (flutter_map uses a list of Marker widgets)
   List<Marker> _mechanicMarkers = [];
   bool _isLoadingMechanics = true;
   String? _errorMessage;
 
-  // User's current location
   LatLng? _userCurrentLocation;
   bool _isFetchingUserLocation = false;
 
   @override
   void initState() {
     super.initState();
-    _fetchMechanics(); // Fetch mechanics when the screen initializes
-    _getCurrentLocation(); // Attempt to get user's current location
+    _fetchMechanics();
+    // Delay getting current location until after the first frame,
+    // ensuring FlutterMap has been rendered.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _getCurrentLocation();
+    });
   }
 
-  // Function to get the user's current location
+  @override
+  void dispose() {
+    _mapController.dispose(); // Dispose the controller when the widget is removed
+    super.dispose();
+  }
+
   Future<void> _getCurrentLocation() async {
     setState(() {
       _isFetchingUserLocation = true;
@@ -72,7 +77,8 @@ class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
       setState(() {
         _userCurrentLocation = LatLng(position.latitude, position.longitude);
         _currentMapCenter = _userCurrentLocation!; // Center map on user's location
-        _mapController.move(_userCurrentLocation!, 14.0); // Move map to user's location
+        // Move map directly as addPostFrameCallback ensures it's rendered
+        _mapController.move(_userCurrentLocation!, 14.0);
         _isFetchingUserLocation = false;
       });
     } catch (e) {
@@ -86,24 +92,20 @@ class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
     }
   }
 
-  // Function to fetch mechanic data from Supabase
   Future<void> _fetchMechanics() async {
     setState(() {
       _isLoadingMechanics = true;
       _errorMessage = null;
-      _mechanicMarkers.clear(); // Clear existing markers
+      _mechanicMarkers.clear();
     });
 
     try {
-      // Fetch mechanics data. Join with profiles to get full_name
-      // The schema shows 'shop_name' directly in 'mechanics' table, and 'full_name' in 'profiles'.
       final List<Map<String, dynamic>> mechanicsData = await supabase
           .from('mechanics')
-          .select('*, profiles!inner(full_name)'); // Use !inner to ensure profile exists
+          .select('*, profiles!inner(full_name)');
 
       List<Marker> newMarkers = [];
 
-      // Add user's current location marker if available
       if (_userCurrentLocation != null) {
         newMarkers.add(
           Marker(
@@ -122,10 +124,8 @@ class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
       for (var mechanic in mechanicsData) {
         final double? lat = mechanic['latitude'];
         final double? lng = mechanic['longitude'];
-        // Prioritize shop_name from mechanics table, fallback to full_name from profiles
         final String? shopName = mechanic['shop_name'] ?? mechanic['profiles']['full_name'] ?? 'Unknown Shop';
         final String? businessAddress = mechanic['business_address'] ?? 'Address not available';
-        // Certifications and specialties are stored as text (comma-separated)
         final String specialtiesString = mechanic['specialties'] != null && (mechanic['specialties'] as String).isNotEmpty
             ? mechanic['specialties'] as String
             : 'No specialties listed';
@@ -192,7 +192,6 @@ class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
     }
   }
 
-  // Function to show mechanic details in an AlertDialog
   void _showMechanicDetails(
     BuildContext context,
     String shopName,
@@ -220,7 +219,6 @@ class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
                 Text('Base Rate: ₱$baseRate per $pricingUnit'),
                 Text('Minimum Charge: ₱$minimumCharge'),
                 Text('Service Radius: $serviceRadius km'),
-                // Add more details as needed
               ],
             ),
           ),
@@ -231,12 +229,10 @@ class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
                 Navigator.of(context).pop();
               },
             ),
-            // You can add a "Contact Mechanic" or "Request Service" button here
             TextButton(
               child: const Text('Request Service'),
               onPressed: () {
-                // TODO: Implement service request logic
-                Navigator.of(context).pop(); // Close dialog
+                Navigator.of(context).pop();
                 snackbarKey.currentState?.showSnackBar(
                   const SnackBar(content: Text('Service request functionality coming soon!')),
                 );
@@ -258,9 +254,9 @@ class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
         centerTitle: true,
         elevation: 1,
       ),
-      drawer: const app_nav.NavigationDrawer(), // Your NavigationDrawer
+      drawer: const app_nav.NavigationDrawer(),
       body: _isLoadingMechanics || _isFetchingUserLocation
-          ? const Center(child: CircularProgressIndicator()) // Show loading spinner
+          ? const Center(child: CircularProgressIndicator())
           : _errorMessage != null
               ? Center(
                   child: Column(
@@ -284,45 +280,35 @@ class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
                   ),
                 )
               : FlutterMap(
-                  mapController: _mapController, // Assign the controller
+                  mapController: _mapController,
                   options: MapOptions(
-                    initialCenter: _currentMapCenter, // Center the map on user's location or default
-                    initialZoom: 12.0, // Initial zoom level
-                    minZoom: 2.0, // Minimum zoom level
-                    maxZoom: 18.0, // Maximum zoom level
+                    initialCenter: _currentMapCenter,
+                    initialZoom: 12.0,
+                    minZoom: 2.0,
+                    maxZoom: 18.0,
                     onPositionChanged: (pos, hasGesture) {
-                      // Update current map center when user drags the map
-                      // Removed unnecessary null check for pos.center
-                      if (pos.center != _currentMapCenter) { // Only update if center actually changed
-                        _currentMapCenter = pos.center;
-                      }
+                      _currentMapCenter = pos.center; // Removed unnecessary null check
                     },
                   ),
                   children: [
-                    // OpenStreetMap Tile Layer
                     TileLayer(
                       urlTemplate: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-                      // It's good practice to provide a user agent
-                      userAgentPackageName: 'com.autofix.app', // Replace with your actual package name
+                      userAgentPackageName: 'com.autofix.app',
                     ),
-                    // Add Marker Layer to display custom markers
                     MarkerLayer(
-                      markers: _mechanicMarkers, // Pass the list of markers
+                      markers: _mechanicMarkers,
                     ),
-                    // You can add more layers here, e.g., PolygonLayer, PolylineLayer
                   ],
                 ),
-      // Optional: FloatingActionButton to recenter map or add new features
       floatingActionButton: Column(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
           FloatingActionButton(
-            heroTag: 'recenterMap', // Unique tag for multiple FABs
+            heroTag: 'recenterMap',
             onPressed: () {
-              // Animate camera back to user's location or default Manila
               _mapController.move(
                 _userCurrentLocation ?? _kDefaultManila,
-                14.0, // Zoom closer to the user
+                14.0,
               );
             },
             backgroundColor: Colors.blue,
@@ -331,7 +317,6 @@ class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
                 : const Icon(Icons.my_location, color: Colors.white),
           ),
           const SizedBox(height: 10),
-          // You could add another FAB here for "Filter Mechanics" etc.
         ],
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
