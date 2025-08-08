@@ -44,7 +44,6 @@ Future<void> main() async {
   await Supabase.initialize(
     url: supabaseUrl,
     anonKey: supabaseAnonKey,
-    
   );
   supabase = Supabase.instance.client; // Get the client instance after initialization
 
@@ -115,8 +114,7 @@ class _MyAppState extends State<MyApp> {
     } on PostgrestException catch (e) {
       print('ERROR: PostgrestException during role fetch: ${e.message}');
       _userRole.value = null; // Set null on error
-      // IMPORTANT: Removed direct supabase.auth.signOut() here to prevent race condition with registration.
-      // The system will eventually redirect to login if role remains null or user attempts restricted actions.
+      // *** REMOVED: await supabase.auth.signOut(); from here ***
       snackbarKey.currentState?.showSnackBar(
         SnackBar(
           content: Text('Error loading user data: ${e.message}. Please try refreshing or re-logging.'),
@@ -126,7 +124,7 @@ class _MyAppState extends State<MyApp> {
     } catch (e) {
       print('ERROR: Unexpected error during role fetch: $e');
       _userRole.value = null; // Set null on error
-      // IMPORTANT: Removed direct supabase.auth.signOut() here.
+      // *** REMOVED: await supabase.auth.signOut(); from here ***
       snackbarKey.currentState?.showSnackBar(
         SnackBar(
           content: Text('An unexpected error occurred loading user data: ${e.toString()}. Please try again.'),
@@ -236,7 +234,7 @@ class NavigationDrawer extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  // Removed '!' as 'user' is guaranteed non-null if 'isLoggedIn' is true
+                  // 'user' is guaranteed non-null here due to 'isLoggedIn' check
                   isLoggedIn ? (user.email ?? 'Logged In User') : 'Guest User', 
                   style: const TextStyle(
                     color: Colors.blue,
@@ -244,9 +242,8 @@ class NavigationDrawer extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                if (isLoggedIn) // Removed '&& user.id != null' as it's redundant
+                if (isLoggedIn) // 'user.id' is guaranteed non-null within 'isLoggedIn' block
                   Text(
-                    // Removed '!' as 'user' is guaranteed non-null here due to 'isLoggedIn' check
                     'ID: ${user.id.substring(0, 8)}...', // Display truncated ID for debugging
                     style: const TextStyle(
                       color: Colors.blueGrey,
