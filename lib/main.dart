@@ -44,9 +44,7 @@ Future<void> main() async {
   await Supabase.initialize(
     url: supabaseUrl,
     anonKey: supabaseAnonKey,
-    // Removed 'authFlowType: AuthFlowType.pkce' as it might not be supported
-    // by your current supabase_flutter package version.
-    // If you need PKCE, consider updating your supabase_flutter dependency.
+    
   );
   supabase = Supabase.instance.client; // Get the client instance after initialization
 
@@ -75,8 +73,8 @@ class _MyAppState extends State<MyApp> {
 
       // Handle different authentication events
       if (event == AuthChangeEvent.signedIn || event == AuthChangeEvent.userUpdated) {
-        // FIXED: Removed redundant null-aware operator on 'session'
-        _fetchUserRole(session!.user.id); // session is guaranteed non-null here
+        // 'session' is guaranteed non-null here due to AuthChangeEvent.signedIn/userUpdated
+        _fetchUserRole(session!.user.id);
       } else if (event == AuthChangeEvent.signedOut) {
         _userRole.value = null; // Clear role on sign out
       }
@@ -99,37 +97,36 @@ class _MyAppState extends State<MyApp> {
           .eq('id', userId)
           .single(); // Use single() to expect one row
 
-      // FIXED: Removed unnecessary 'response != null' check
+      // If response is received and 'role' is not null
       if (response['role'] != null) {
         _userRole.value = response['role'] as String;
         print('DEBUG: User role fetched: ${_userRole.value}');
       } else {
-        // If profile found but no role, or no profile at all, sign out.
-        print('User profile or role not found for user ID: $userId. Signing out.');
-        await supabase.auth.signOut(); // FORCE LOGOUT
-        _userRole.value = null;
+        // If profile found but 'role' column is null (should ideally not happen with proper registration)
+        print('User profile found for ID: $userId, but role is null. Not signing out.');
+        _userRole.value = null; // Role is null, so reflect that
         snackbarKey.currentState?.showSnackBar(
           const SnackBar(
-            content: Text('Your profile could not be loaded. Please register or complete your profile.'),
+            content: Text('Your profile\'s role could not be loaded. Please ensure your profile is complete.'),
             backgroundColor: Colors.orange,
           ),
         );
       }
     } on PostgrestException catch (e) {
-      print('ERROR: Error fetching user role (PostgrestException): ${e.message}');
-      // This is the "0 rows returned" error. Force logout.
-      await supabase.auth.signOut(); // FORCE LOGOUT
-      _userRole.value = null;
+      print('ERROR: PostgrestException during role fetch: ${e.message}');
+      _userRole.value = null; // Set null on error
+      // IMPORTANT: Removed direct supabase.auth.signOut() here to prevent race condition with registration.
+      // The system will eventually redirect to login if role remains null or user attempts restricted actions.
       snackbarKey.currentState?.showSnackBar(
         SnackBar(
-          content: Text('Error loading user data: ${e.message}. Please try registering again.'),
+          content: Text('Error loading user data: ${e.message}. Please try refreshing or re-logging.'),
           backgroundColor: Colors.red,
         ),
       );
     } catch (e) {
-      print('ERROR: Unexpected error fetching user role: $e');
-      await supabase.auth.signOut(); // FORCE LOGOUT for any other error
-      _userRole.value = null;
+      print('ERROR: Unexpected error during role fetch: $e');
+      _userRole.value = null; // Set null on error
+      // IMPORTANT: Removed direct supabase.auth.signOut() here.
       snackbarKey.currentState?.showSnackBar(
         SnackBar(
           content: Text('An unexpected error occurred loading user data: ${e.toString()}. Please try again.'),
@@ -177,8 +174,7 @@ class _MyAppState extends State<MyApp> {
                 } else {
                   // If user is authenticated but role is still null (loading or error)
                   if (role == null) {
-                    // This state should now be very brief, as _fetchUserRole will sign out
-                    // if a profile is genuinely missing.
+                    // This state should now be very brief, as _fetchUserRole will eventually resolve
                     return const Scaffold(
                       body: Center(
                         child: CircularProgressIndicator(),
@@ -240,7 +236,7 @@ class NavigationDrawer extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  // Use null-aware operator safely, as user is non-null if isLoggedIn is true
+                  // Removed '!' as 'user' is guaranteed non-null if 'isLoggedIn' is true
                   isLoggedIn ? (user.email ?? 'Logged In User') : 'Guest User', 
                   style: const TextStyle(
                     color: Colors.blue,
@@ -250,7 +246,7 @@ class NavigationDrawer extends StatelessWidget {
                 ),
                 if (isLoggedIn) // Removed '&& user.id != null' as it's redundant
                   Text(
-                    // user is guaranteed non-null here due to 'isLoggedIn' check
+                    // Removed '!' as 'user' is guaranteed non-null here due to 'isLoggedIn' check
                     'ID: ${user.id.substring(0, 8)}...', // Display truncated ID for debugging
                     style: const TextStyle(
                       color: Colors.blueGrey,
