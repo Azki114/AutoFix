@@ -114,7 +114,6 @@ class _MyAppState extends State<MyApp> {
     } on PostgrestException catch (e) {
       print('ERROR: PostgrestException during role fetch: ${e.message}');
       _userRole.value = null; // Set null on error
-      // *** REMOVED: await supabase.auth.signOut(); from here ***
       snackbarKey.currentState?.showSnackBar(
         SnackBar(
           content: Text('Error loading user data: ${e.message}. Please try refreshing or re-logging.'),
