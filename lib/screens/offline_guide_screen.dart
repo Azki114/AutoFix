@@ -1,13 +1,12 @@
 // lib/screens/offline_guide_screen.dart
 import 'package:flutter/material.dart';
 import 'package:autofix/main.dart' as app_nav;
-import 'package:autofix/screens/guide_viewer_screen.dart';
+import 'package:autofix/screens/guide_viewer_screen.dart'; // Ensure this import is correct
 
 class OfflineGuideScreen extends StatelessWidget {
   const OfflineGuideScreen({super.key});
 
   // Define your Markdown content as a multiline string here
-  // Updated to use more general terms like "vehicle"
   static const String _engineStartingGuideContent = '''
 # Engine Starting Issues Troubleshooting
 
@@ -137,11 +136,11 @@ This guide will walk you through the essential steps to properly diagnose a vehi
 
 ## 🗂 Battery Types
 
-| Type              | Common Vehicles         | Maintenance |
-|-------------------|-------------------------|-------------|
-| Lead-Acid         | Most cars, motorcycles  | Medium      |
+| Type          | Common Vehicles     | Maintenance |
+|---------------|---------------------|-------------|
+| Lead-Acid     | Most cars, motorcycles | Medium      |
 | AGM (Absorbed Glass Mat) | Cars, motorcycles | Low         |
-| Lithium-Ion       | Modern motorcycles      | Very Low    |
+| Lithium-Ion   | Modern motorcycles  | Very Low    |
 
 ---
 
@@ -238,12 +237,12 @@ Use a battery load tester or vehicle’s starter system to simulate a load.
 
 ## 🚗 Differences: Motorcycle vs. Car Batteries
 
-| Feature         | Motorcycle Battery | Car Battery       |
-|----------------|--------------------|-------------------|
-| Size            | Smaller            | Larger            |
-| Cold Crank Amps | Lower (100–300 CCA)| Higher (400–900 CCA) |
-| Charging System | Simpler            | More Powerful     |
-| Lifespan        | 2–4 years          | 3–6 years         |
+| Feature           | Motorcycle Battery | Car Battery       |
+|-------------------|--------------------|-------------------|
+| Size              | Smaller            | Larger            |
+| Cold Crank Amps   | Lower (100–300 CCA)| Higher (400–900 CCA) |
+| Charging System   | Simpler            | More Powerful     |
+| Lifespan          | 2–4 years          | 3–6 years         |
 
 ---
 
@@ -290,12 +289,12 @@ Regular brake inspection is critical for rider and driver safety. This guide out
 ## 🔍 Brake System Components
 
 | Component         | Motorcycle                 | Four-Wheeled Vehicle         |
-|------------------|----------------------------|------------------------------|
-| Brake Pads       | Front and rear disc pads   | Front and rear disc/drum pads|
-| Brake Discs      | Front and sometimes rear   | All four wheels (usually)    |
-| Brake Lines      | Rubber or braided steel    | Rubber or steel hard lines   |
-| Master Cylinder  | Usually on handlebars      | Near driver’s side firewall  |
-| Brake Fluid      | DOT 3, 4, or 5.1 fluid      | Same as motorcycle           |
+|-------------------|----------------------------|------------------------------|
+| Brake Pads        | Front and rear disc pads   | Front and rear disc/drum pads|
+| Brake Discs       | Front and sometimes rear   | All four wheels (usually)    |
+| Brake Lines       | Rubber or braided steel    | Rubber or steel hard lines   |
+| Master Cylinder   | Usually on handlebars      | Near driver’s side firewall  |
+| Brake Fluid       | DOT 3, 4, or 5.1 fluid     | Same as motorcycle           |
 
 ---
 
@@ -309,8 +308,8 @@ Regular brake inspection is critical for rider and driver safety. This guide out
 - Brake fluid (level and color)
 - Brake lines (cracks, leaks, bulges)
 
-> **Minimum pad thickness:**  
-> - Motorcycle: **2-3 mm**  
+> **Minimum pad thickness:**
+> - Motorcycle: **2-3 mm**
 > - Car: **3 mm** or more
 
 ---
@@ -404,12 +403,12 @@ Regular brake inspection is critical for rider and driver safety. This guide out
 
 ## 🚗 Motorcycle vs. Car Differences
 
-| Feature          | Motorcycle             | Four-Wheeled Vehicle        |
-|------------------|------------------------|-----------------------------|
-| Brake Setup      | Independent front/rear | Hydraulic system w/ABS      |
-| Fluid Access     | Small master cylinders | Larger reservoir under hood |
-| Pad Wear         | Faster in front        | Even wear (front > rear)    |
-| Disc Size        | Smaller rotors         | Larger, ventilated rotors   |
+| Feature           | Motorcycle           | Four-Wheeled Vehicle      |
+|-------------------|------------------------|---------------------------|
+| Brake Setup       | Independent front/rear | Hydraulic system w/ABS    |
+| Fluid Access      | Small master cylinders | Larger reservoir under hood |
+| Pad Wear          | Faster in front        | Even wear (front > rear)  |
+| Disc Size         | Smaller rotors         | Larger, ventilated rotors |
 
 ---
 
@@ -431,8 +430,8 @@ Regular brake inspection is critical for rider and driver safety. This guide out
 
 ---
 
-*Prepared by: [Your Name or Organization]*  
-*Date: 2025-07-28*  
+*Prepared by: [Your Name or Organization]*
+*Date: 2025-07-28*
 
 
 ''';
@@ -519,13 +518,13 @@ Regular oil changes are essential to maintain engine performance and longevity. 
 - Pour slowly and check the level using the **dipstick** or **inspection window** (for motorcycles).
 
 #### Fill Quantities (General Estimates):
-| Vehicle Type      | Engine Size    | Oil Volume      |
-|-------------------|----------------|-----------------|
-| Small Motorcycle  | ~125–250cc     | 1.0 – 1.5 liters|
-| Mid Motorcycle    | ~400–650cc     | 2.0 – 3.0 liters|
-| Large Motorcycle  | ~750–1000cc+   | 3.5 – 4.5 liters|
-| Car (small)       | ~1.0–1.6L      | 3.5 – 4.0 liters|
-| Car (mid/full)    | ~1.8–3.5L+     | 4.0 – 6.0 liters|
+| Vehicle Type    | Engine Size    | Oil Volume      |
+|-----------------|----------------|-----------------|
+| Small Motorcycle| ~125–250cc     | 1.0 – 1.5 liters|
+| Mid Motorcycle  | ~400–650cc     | 2.0 – 3.0 liters|
+| Large Motorcycle| ~750–1000cc+   | 3.5 – 4.5 liters|
+| Car (small)     | ~1.0–1.6L      | 3.5 – 4.0 liters|
+| Car (mid/full)  | ~1.8–3.5L+     | 4.0 – 6.0 liters|
 
 ---
 
@@ -563,8 +562,8 @@ Regular oil changes are essential to maintain engine performance and longevity. 
 
 ## 🧾 Oil Change Interval Reference
 
-| Vehicle Type    | Oil Type        | Recommended Interval        |
-|-----------------|------------------|------------------------------|
+| Vehicle Type    | Oil Type         | Recommended Interval        |
+|-----------------|------------------|-----------------------------|
 | Motorcycle      | Mineral          | 3,000 km / 2,000 mi         |
 | Motorcycle      | Semi-Synthetic   | 5,000 km / 3,000 mi         |
 | Motorcycle      | Full Synthetic   | 6,000–8,000 km / 4,000–5,000 mi |
@@ -593,8 +592,8 @@ Regular oil changes are essential to maintain engine performance and longevity. 
 
 ---
 
-*Prepared by: [Your Name or Organization]*  
-*Date: 2025-07-28*  
+*Prepared by: [Your Name or Organization]*
+*Date: 2025-07-28*
 
 
 ''';
@@ -621,14 +620,14 @@ Engine overheating can cause serious and costly damage. This guide will help you
 
 ## ⚠️ Symptoms of Overheating
 
-| Symptom                             | Common in Cars | Common in Motorcycles |
+| Symptom                               | Common in Cars | Common in Motorcycles |
 |-------------------------------------|----------------|------------------------|
-| Rising temperature gauge            | ✅              | ✅                      |
-| Coolant boiling or steaming         | ✅              | ✅                      |
-| Engine knocking or loss of power    | ✅              | ✅                      |
-| Coolant smell or leaks              | ✅              | ✅                      |
-| Radiator fan constantly running     | ✅              | ✅                      |
-| Warning lights on dashboard         | ✅              | ❌ (depends on model)   |
+| Rising temperature gauge            | ✅             | ✅                     |
+| Coolant boiling or steaming         | ✅             | ✅                     |
+| Engine knocking or loss of power    | ✅             | ✅                     |
+| Coolant smell or leaks              | ✅             | ✅                     |
+| Radiator fan constantly running     | ✅             | ✅                     |
+| Warning lights on dashboard         | ✅             | ❌ (depends on model)  |
 
 ---
 
@@ -707,7 +706,7 @@ Engine overheating can cause serious and costly damage. This guide will help you
 
 ### 8. **Look for Signs of a Blown Head Gasket**
 
-| Symptom                  | Indicates |
+| Symptom                   | Indicates |
 |--------------------------|-----------|
 | White smoke from exhaust | Coolant in combustion |
 | Bubbles in coolant tank  | Combustion gases in coolant |
@@ -729,7 +728,7 @@ Engine overheating can cause serious and costly damage. This guide will help you
 
 ## 🧼 Preventive Maintenance
 
-| Task                        | Frequency           |
+| Task                      | Frequency           |
 |-----------------------------|---------------------|
 | Coolant level check         | Weekly or before rides |
 | Full coolant flush          | Every 2 years or per manual |
@@ -739,9 +738,83 @@ Engine overheating can cause serious and costly damage. This guide will help you
 
 
 ''';
-  
-  
-  
+  // New Markdown content for Basic Engine Check
+  static const String _basicEngineCheckContent = '''
+# Basic Engine Check Guide
+
+Regularly checking your vehicle's engine is crucial for its longevity and your safety. This guide provides fundamental steps for a quick and effective basic engine inspection.
+
+---
+
+## 1. **Check Engine Oil Level**
+* **Location:** Locate the dipstick, usually with a brightly colored handle.
+* **Procedure:** Pull out the dipstick, wipe it clean, reinsert it fully, then pull it out again.
+* **Reading:** The oil level should be between the 'MIN' and 'MAX' marks.
+* **Action:** If low, add the appropriate type of oil as specified in your owner's manual.
+  * 
+---
+
+## 2. **Check Coolant Level**
+* **Location:** Find the coolant reservoir (often clear plastic, with 'MIN' and 'MAX' lines).
+* **Procedure:** **Ensure the engine is cool** before opening any caps. The level should be between the marks.
+* **Action:** If low, add a 50/50 mix of coolant and distilled water (or pre-mixed coolant) to the 'MAX' line.
+  * 
+---
+
+## 3. **Inspect Brake Fluid Level**
+* **Location:** The brake fluid reservoir is typically a small, clear plastic container near the master cylinder (often on the driver's side).
+* **Procedure:** The fluid level should be between the 'MIN' and 'MAX' marks.
+* **Action:** If low, top up with the correct DOT-specified brake fluid. A consistently low level might indicate a leak or worn brake pads.
+  * 
+---
+
+## 4. **Check Power Steering Fluid (if applicable)**
+* **Location:** Look for a reservoir with a cap often labeled 'Power Steering'.
+* **Procedure:** Check the level using the dipstick attached to the cap or the marks on the reservoir.
+* **Action:** Top up if necessary with the recommended power steering fluid.
+
+---
+
+## 5. **Inspect Washer Fluid**
+* **Location:** The washer fluid reservoir is usually a large plastic container, often with a windshield icon on the cap.
+* **Procedure:** Simply visually check the level.
+* **Action:** Refill with windshield washer fluid as needed.
+
+---
+
+## 6. **Battery Terminals**
+* **Visual Check:** Look for any corrosion (white or bluish powdery substance) on the battery terminals.
+* **Connections:** Ensure the cables are tightly connected to the terminals. Loose or corroded connections can prevent proper starting.
+  * 
+---
+
+## 7. **Hoses and Belts**
+* **Hoses:** Briefly inspect radiator and heater hoses for cracks, bulges, or leaks. They should feel firm, not overly soft or squishy.
+* **Belts:** Check serpentine belts for cracks, fraying, or excessive looseness.
+
+---
+
+## 8. **Tire Pressure**
+* **Importance:** Incorrect tire pressure affects safety, fuel efficiency, and tire lifespan.
+* **Procedure:** Use a tire pressure gauge to check each tire (including the spare). Refer to your car's manual or the sticker inside the driver's door for the recommended pressure.
+  * 
+---
+
+## 9. **Lights Check**
+* **Exterior:** Turn on headlights (high and low beam), turn signals, brake lights (get someone to help you check these), and hazard lights.
+* **Interior:** Check dashboard warning lights. If any are on (especially 'Check Engine', 'Oil Pressure', 'Battery', or 'Brake'), investigate further.
+
+---
+
+## 10. **Listen to Your Engine**
+* **Sounds:** Pay attention to any unusual noises like knocking, squealing, hissing, or grinding. These can indicate underlying problems.
+
+---
+
+*Regular basic checks can help prevent larger issues down the road.*
+''';
+
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -766,6 +839,18 @@ Engine overheating can cause serious and costly damage. This guide will help you
           ),
           const SizedBox(height: 20),
 
+          // New Video Guide Card, now with both video and markdown content
+          _buildGuideCard(
+            context,
+            title: 'Basic Engine Check', // Title can be more general now
+            description: 'A visual and text guide on performing a basic engine check.',
+            icon: Icons.play_circle_fill,
+            videoAssetPath: 'assets/videos/testing.mp4', // Your video asset path
+            markdownContent: _basicEngineCheckContent, // Now providing markdown content
+          ),
+          const SizedBox(height: 10), // Spacing between cards
+
+          // Existing Markdown Guide Cards
           _buildGuideCard(
             context,
             title: 'Engine Starting Issues',
@@ -816,10 +901,14 @@ Engine overheating can cause serious and costly damage. This guide will help you
   Widget _buildGuideCard(BuildContext context, {
     required String title,
     required String description,
-    String? assetPath,
     String? markdownContent,
+    String? videoAssetPath, // New: Optional video asset path
     required IconData icon,
   }) {
+    // Determine which buttons to show
+    final bool hasMarkdownContent = markdownContent != null && markdownContent.isNotEmpty;
+    final bool hasVideoContent = videoAssetPath != null && videoAssetPath.isNotEmpty;
+
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 8.0),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -855,26 +944,59 @@ Engine overheating can cause serious and costly damage. This guide will help you
             const SizedBox(height: 16),
             Align(
               alignment: Alignment.centerRight,
-              child: ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => GuideViewerScreen(
-                        guideTitle: title,
-                        guideAssetPath: assetPath,
-                        markdownContent: markdownContent,
+              child: Row( // Use a Row to hold multiple buttons
+                mainAxisSize: MainAxisSize.min, // Keep row compact
+                children: [
+                  if (hasVideoContent)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8.0), // Spacing between buttons
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => GuideViewerScreen(
+                                guideTitle: title,
+                                videoAssetPath: videoAssetPath,
+                                // Pass markdownContent as null if primarily a video guide
+                                markdownContent: null, // Ensure only video is passed for video view
+                              ),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.videocam, color: Colors.white),
+                        label: const Text('Watch Video', style: TextStyle(color: Colors.white)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          elevation: 2,
+                        ),
                       ),
                     ),
-                  );
-                },
-                icon: const Icon(Icons.remove_red_eye, color: Colors.white),
-                label: const Text('View Guide', style: TextStyle(color: Colors.white)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  elevation: 2,
-                ),
+                  if (hasMarkdownContent)
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => GuideViewerScreen(
+                              guideTitle: title,
+                              markdownContent: markdownContent,
+                              // Pass videoAssetPath as null if primarily a text guide
+                              videoAssetPath: null, // Ensure only markdown is passed for text view
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.remove_red_eye, color: Colors.white),
+                      label: const Text('View Guide', style: TextStyle(color: Colors.white)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        elevation: 2,
+                      ),
+                    ),
+                ],
               ),
             ),
           ],

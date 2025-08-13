@@ -166,15 +166,43 @@ class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
       for (var mechanic in mechanicsData) {
         final double? lat = mechanic['latitude'];
         final double? lng = mechanic['longitude'];
-        final String? shopName = mechanic['shop_name'] ?? mechanic['profiles']['full_name'] ?? 'Unknown Shop';
-        final String? businessAddress = mechanic['business_address'] ?? 'Address not available';
-        final String specialtiesString = mechanic['specialties'] != null && (mechanic['specialties'] as String).isNotEmpty
-            ? mechanic['specialties'] as String
+        
+        // --- START: Robust Null and Type Handling for ALL String fields before passing ---
+        // Safely get shopName, prioritizing 'shop_name' then 'full_name', defaulting to 'Unknown Shop'
+        final String shopName = (mechanic['shop_name']?.toString() ?? 
+                           (mechanic['profiles'] is Map<String, dynamic> 
+                               ? mechanic['profiles']['full_name']?.toString() 
+                               : null)) ?? 'Unknown Shop';
+        
+        // Safely get businessAddress, defaulting to 'Address not available'
+        final String businessAddress = mechanic['business_address']?.toString() ?? 'Address not available';
+        
+        // Safely get specialties, defaulting to 'No specialties listed'
+        final String specialtiesString = (mechanic['specialties']?.toString().isNotEmpty == true)
+            ? mechanic['specialties'].toString()
             : 'No specialties listed';
 
-        final String certificationsString = mechanic['certifications'] != null && (mechanic['certifications'] as String).isNotEmpty
-            ? mechanic['certifications'] as String
+        // Safely get certifications, defaulting to 'No certifications listed'
+        final String certificationsString = (mechanic['certifications']?.toString().isNotEmpty == true)
+            ? mechanic['certifications'].toString()
             : 'No certifications listed';
+
+        // Safely get years_experience
+        final String yearsExperience = mechanic['years_experience']?.toString() ?? 'N/A';
+
+        // Safely get base_rate_php
+        final String baseRatePhp = mechanic['base_rate_php']?.toString() ?? 'N/A';
+
+        // Safely get pricing_unit
+        final String pricingUnit = mechanic['pricing_unit']?.toString() ?? 'N/A';
+
+        // Safely get minimum_charge_php
+        final String minimumChargePhp = mechanic['minimum_charge_php']?.toString() ?? 'N/A';
+
+        // Safely get service_radius_km
+        final String serviceRadiusKm = mechanic['service_radius_km']?.toString() ?? 'N/A';
+
+        // --- END: Robust Null and Type Handling for ALL String fields before passing ---
 
 
         if (lat != null && lng != null) {
@@ -187,17 +215,17 @@ class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
                 onTap: () {
                   _showMechanicDetails(
                     context,
-                    mechanic['id'] as String, // Pass mechanic ID for directions
-                    shopName!,
+                    mechanic['id']?.toString() ?? '', // Pass mechanic ID as String
+                    shopName, // Guaranteed non-null String
                     LatLng(lat, lng), // Pass LatLng for directions
-                    businessAddress!,
-                    specialtiesString,
-                    certificationsString,
-                    mechanic['years_experience']?.toString() ?? 'N/A',
-                    mechanic['base_rate_php']?.toString() ?? 'N/A',
-                    mechanic['pricing_unit'] ?? 'N/A',
-                    mechanic['minimum_charge_php']?.toString() ?? 'N/A',
-                    mechanic['service_radius_km']?.toString() ?? 'N/A',
+                    businessAddress, // Guaranteed non-null String
+                    specialtiesString, // Guaranteed non-null String
+                    certificationsString, // Guaranteed non-null String
+                    yearsExperience, // Guaranteed non-null String
+                    baseRatePhp, // Guaranteed non-null String
+                    pricingUnit, // Guaranteed non-null String
+                    minimumChargePhp, // Guaranteed non-null String
+                    serviceRadiusKm, // Guaranteed non-null String
                   );
                 },
                 child: const Icon(
@@ -327,17 +355,17 @@ class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          title: Text(shopName, style: const TextStyle(fontWeight: FontWeight.bold)),
+          title: Text(shopName), // shopName is now guaranteed non-null
           content: SingleChildScrollView(
             child: ListBody(
               children: <Widget>[
-                Text('Address: $address'),
-                Text('Specialties: $specialties'),
-                Text('Certifications: $certifications'),
-                Text('Years Experience: $yearsExperience'),
-                Text('Base Rate: ₱$baseRate per $pricingUnit'),
-                Text('Minimum Charge: ₱$minimumCharge'),
-                Text('Service Radius: $serviceRadius km'),
+                Text('Address: $address'), // Fixed: Removed ?? 'N/A'
+                Text('Specialties: $specialties'), // Fixed: Removed ?? 'N/A'
+                Text('Certifications: $certifications'), // Fixed: Removed ?? 'N/A'
+                Text('Years Experience: $yearsExperience'), // Fixed: Removed ?? 'N/A'
+                Text('Base Rate: ₱$baseRate per $pricingUnit'), // Fixed: Removed ?? 'N/A'
+                Text('Minimum Charge: ₱$minimumCharge'), // Fixed: Removed ?? 'N/A'
+                Text('Service Radius: $serviceRadius km'), // Fixed: Removed ?? 'N/A'
               ],
             ),
           ),
