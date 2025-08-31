@@ -5,7 +5,7 @@ import 'package:autofix/main.dart'; // To access the global 'supabase' client
 import 'package:autofix/main.dart' as app_nav; // For NavigationDrawer
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({Key? key}) : super(key: key);
+  const LoginScreen({super.key});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();

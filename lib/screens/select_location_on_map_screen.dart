@@ -9,7 +9,7 @@ class SelectLocationOnMapScreen extends StatefulWidget {
   // around the user's current location or a previous selection.
   final LatLng? initialLocation;
 
-  const SelectLocationOnMapScreen({Key? key, this.initialLocation}) : super(key: key);
+  const SelectLocationOnMapScreen({super.key, this.initialLocation});
 
   @override
   State<SelectLocationOnMapScreen> createState() => _SelectLocationOnMapScreenState();
@@ -60,7 +60,7 @@ class _SelectLocationOnMapScreenState extends State<SelectLocationOnMapScreen> {
     } catch (e) {
       // If an error occurs during fetching, show a more user-friendly message
       _addressDisplay = 'Could not fetch address. Coordinates will be used.';
-      print('Error reverse geocoding: $e'); // Log the actual error for debugging
+      // Log the actual error for debugging
     } finally {
       setState(() {
         _isReverseGeocoding = false;

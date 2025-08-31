@@ -46,7 +46,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _isLoading = false;
       });
     } on PostgrestException catch (e) {
-      print('Error fetching profile: ${e.message}');
       snackbarKey.currentState?.showSnackBar(
         SnackBar(content: Text('Failed to load profile: ${e.message}')),
       );
@@ -54,7 +53,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _isLoading = false;
       });
     } catch (e) {
-      print('Unexpected error fetching profile: $e');
       snackbarKey.currentState?.showSnackBar(
         SnackBar(content: Text('An unexpected error occurred: ${e.toString()}')),
       );

@@ -104,7 +104,6 @@ class _AiDiagnosisScreenState extends State<AiDiagnosisScreen> {
         _messages.add(ChatMessage(text: 'Error: ${e.toString()}', isUser: false));
         _isLoading = false; // Hide loading indicator
       });
-      print('Error sending message to Gemini: $e');
     }
   }
 
@@ -138,6 +137,7 @@ class _AiDiagnosisScreenState extends State<AiDiagnosisScreen> {
                       borderRadius: BorderRadius.circular(12.0),
                       boxShadow: [
                         BoxShadow(
+                          // ignore: deprecated_member_use
                           color: Colors.grey.withOpacity(0.2),
                           spreadRadius: 1,
                           blurRadius: 3,

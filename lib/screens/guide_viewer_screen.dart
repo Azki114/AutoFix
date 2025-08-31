@@ -42,7 +42,6 @@ class _GuideViewerScreenState extends State<GuideViewerScreen> {
         }
       }).catchError((error) {
         // Handle video initialization errors
-        print('Error initializing video: $error');
         if (mounted) {
           setState(() {
             // Set future to null to indicate an error, or show a fallback

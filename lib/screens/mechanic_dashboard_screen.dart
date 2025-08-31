@@ -6,6 +6,7 @@ import 'package:autofix/main.dart'; // To access the global 'supabase' client an
 import 'package:autofix/screens/select_location_on_map_screen.dart'; // For editing shop location
 import 'package:latlong2/latlong.dart'; // For LatLng
 import 'package:geocoding/geocoding.dart'; // For reverse geocoding
+import 'package:autofix/screens/chat_list_screen.dart'; // NEW: Import ChatListScreen
 
 class MechanicDashboardScreen extends StatefulWidget {
   const MechanicDashboardScreen({super.key});
@@ -30,6 +31,7 @@ class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
   final TextEditingController _specialtiesController = TextEditingController();
 
   LatLng? _currentShopLocation; // Store the LatLng for map interaction
+  String? _mechanicName; // To display welcome message
 
   @override
   void initState() {
@@ -69,34 +71,38 @@ class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
       // Fetch mechanic details for the current user
       final response = await supabase
           .from('mechanics')
-          .select('*')
+          .select('*, profiles!inner(full_name)') // Also fetch full_name from profiles
           .eq('user_id', user.id)
           .single();
 
-      setState(() {
-        _mechanicShopData = response;
-        _isLoading = false;
+      if (mounted) {
+        setState(() {
+          _mechanicShopData = response;
+          _isLoading = false;
 
-        // Populate controllers with fetched data for editing
-        _shopNameController.text = _mechanicShopData!['shop_name'] ?? '';
-        _businessAddressController.text = _mechanicShopData!['business_address'] ?? '';
-        _serviceRadiusController.text = (_mechanicShopData!['service_radius_km'] ?? '').toString();
-        _baseRateController.text = (_mechanicShopData!['base_rate_php'] ?? '').toString();
-        _minimumChargeController.text = (_mechanicShopData!['minimum_charge_php'] ?? '').toString();
-        _yearsExperienceController.text = (_mechanicShopData!['years_experience'] ?? '').toString();
-        _certificationsController.text = _mechanicShopData!['certifications'] ?? ''; // Stored as text
-        _specialtiesController.text = _mechanicShopData!['specialties'] ?? ''; // Stored as text
+          // Populate controllers with fetched data for editing
+          _shopNameController.text = _mechanicShopData!['shop_name'] ?? '';
+          _businessAddressController.text = _mechanicShopData!['business_address'] ?? '';
+          _serviceRadiusController.text = (_mechanicShopData!['service_radius_km'] ?? '').toString();
+          _baseRateController.text = (_mechanicShopData!['base_rate_php'] ?? '').toString();
+          _minimumChargeController.text = (_mechanicShopData!['minimum_charge_php'] ?? '').toString();
+          _yearsExperienceController.text = (_mechanicShopData!['years_experience'] ?? '').toString();
+          _certificationsController.text = _mechanicShopData!['certifications'] ?? ''; // Stored as text
+          _specialtiesController.text = _mechanicShopData!['specialties'] ?? ''; // Stored as text
 
-        // Set current shop location for map interaction
-        final double? lat = _mechanicShopData!['latitude'];
-        final double? lng = _mechanicShopData!['longitude'];
-        if (lat != null && lng != null) {
-          _currentShopLocation = LatLng(lat, lng);
-        }
-      });
+          // Set current shop location for map interaction
+          final double? lat = _mechanicShopData!['latitude'];
+          final double? lng = _mechanicShopData!['longitude'];
+          if (lat != null && lng != null) {
+            _currentShopLocation = LatLng(lat, lng);
+          }
+          
+          // Set mechanic name from joined profile data
+          _mechanicName = (_mechanicShopData!['profiles'] as Map<String, dynamic>?)?['full_name'] ?? 'Mechanic';
+        });
+      }
     } on PostgrestException catch (e) {
       _errorMessage = 'Error loading shop data: ${e.message}';
-      print('Error fetching mechanic shop data: ${e.message}');
       snackbarKey.currentState?.showSnackBar(
         SnackBar(content: Text(_errorMessage!), backgroundColor: Colors.red),
       );
@@ -105,7 +111,6 @@ class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
       });
     } catch (e) {
       _errorMessage = 'An unexpected error occurred: ${e.toString()}';
-      print('Unexpected error fetching mechanic shop data: $e');
       snackbarKey.currentState?.showSnackBar(
         SnackBar(content: Text(_errorMessage!), backgroundColor: Colors.red),
       );
@@ -141,7 +146,6 @@ class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
         'specialties': _specialtiesController.text.trim(),
         'latitude': _currentShopLocation?.latitude,
         'longitude': _currentShopLocation?.longitude,
-        // Add other fields you want to allow editing
       };
 
       await supabase
@@ -153,10 +157,8 @@ class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
       _fetchMechanicShopData(); // Refresh data after update
     } on PostgrestException catch (e) {
       _showSnackBar('Error updating shop data: ${e.message}', Colors.red);
-      print('Error updating mechanic shop data: ${e.message}');
     } catch (e) {
       _showSnackBar('An unexpected error occurred during update: ${e.toString()}', Colors.red);
-      print('Unexpected error updating mechanic shop data: $e');
     } finally {
       setState(() {
         _isLoading = false;
@@ -184,6 +186,41 @@ class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
         hintText: hint,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      ),
+    );
+  }
+
+  // Helper method to build a dashboard card
+  Widget _buildDashboardCard(BuildContext context, {
+    required String title,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    return Card(
+      elevation: 5,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(15),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 50, color: Colors.blue),
+              const SizedBox(height: 10),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blueGrey,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -225,8 +262,74 @@ class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      Text(
+                        'Welcome, ${_mechanicName ?? 'Mechanic'}!',
+                        style: const TextStyle(
+                            fontSize: 24, fontWeight: FontWeight.bold, color: Colors.blue),
+                      ),
+                      const SizedBox(height: 20),
+                      // Dashboard Grid for main actions
+                      GridView.count(
+                        shrinkWrap: true, // Make GridView take only necessary space
+                        physics: const NeverScrollableScrollPhysics(), // Disable GridView's own scrolling
+                        crossAxisCount: 2, // 2 columns
+                        crossAxisSpacing: 16.0,
+                        mainAxisSpacing: 16.0,
+                        children: [
+                          // Card for "My Chats"
+                          _buildDashboardCard(
+                            context,
+                            title: 'My Chats',
+                            icon: Icons.chat,
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => const ChatListScreen(),
+                                ),
+                              );
+                            },
+                          ),
+                          // Placeholder for other Mechanic functions
+                          _buildDashboardCard(
+                            context,
+                            title: 'Service Requests',
+                            icon: Icons.handyman,
+                            onTap: () {
+                              snackbarKey.currentState?.showSnackBar(
+                                const SnackBar(content: Text('Service Requests coming soon!')),
+                              );
+                              // TODO: Navigate to Service Requests screen
+                            },
+                          ),
+                          _buildDashboardCard(
+                            context,
+                            title: 'My Profile',
+                            icon: Icons.person,
+                            onTap: () {
+                              snackbarKey.currentState?.showSnackBar(
+                                const SnackBar(content: Text('Profile edit fields are below!')),
+                              );
+                              // Can also navigate to a separate profile screen if desired
+                            },
+                          ),
+                          _buildDashboardCard(
+                            context,
+                            title: 'Settings',
+                            icon: Icons.settings,
+                            onTap: () {
+                              snackbarKey.currentState?.showSnackBar(
+                                const SnackBar(content: Text('Settings coming soon!')),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 32), // Separator
+
+                      // Shop Information Edit Section
                       const Text(
-                        'Shop Information',
+                        'Edit Shop Information',
                         style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.blue),
                         textAlign: TextAlign.center,
                       ),
@@ -337,4 +440,3 @@ class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
     );
   }
 }
-

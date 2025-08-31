@@ -9,13 +9,15 @@ import 'package:autofix/screens/register_screen.dart';
 import 'package:autofix/screens/profile_screen.dart'; // User Profile Screen
 import 'package:autofix/screens/splash_screen.dart'; // For initial loading/redirection
 import 'package:autofix/screens/vehicle_owner_map_screen.dart'; // Driver's map
-import 'package:autofix/screens/mechanic_dashboard_screen.dart'; // Mechanic's dedicated screen
+import 'package:autofix/screens/mechanic_service_requests_screen.dart'; // MECHANIC'S NEW DEDICATED SCREEN
+import 'package:autofix/screens/chat_list_screen.dart'; // Import the new ChatListScreen
 
 // --- Existing app screens ---
 import 'package:autofix/screens/ai_diagnosis_screen.dart';
 import 'package:autofix/screens/offline_guide_screen.dart';
 import 'package:autofix/screens/settings_screen.dart';
 import 'package:autofix/screens/terms_conditions_screen.dart';
+import 'package:autofix/screens/account_screen.dart'; // Account screen from previous update
 
 // Global Supabase client instance
 late final SupabaseClient supabase;
@@ -36,7 +38,6 @@ Future<void> main() async {
 
   // Check if the Supabase environment variables were successfully loaded.
   if (supabaseUrl == null || supabaseUrl.isEmpty || supabaseAnonKey == null || supabaseAnonKey.isEmpty) {
-    print('Error: Supabase URL or Anon Key not found in .env file. Please check your .env and pubspec.yaml assets.');
     throw Exception('Supabase environment variables are missing.');
   }
 
@@ -76,11 +77,28 @@ class _MyAppState extends State<MyApp> {
         _fetchUserRole(session!.user.id);
       } else if (event == AuthChangeEvent.signedOut) {
         _userRole.value = null; // Clear role on sign out
+        // When signed out, automatically redirect to login if not already there
+        if (mounted) {
+          Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+        }
+      } else if (event == AuthChangeEvent.initialSession) {
+        // Handle initial session to set role if already logged in
+        if (session != null) {
+          _fetchUserRole(session.user.id);
+        } else {
+          _userRole.value = null;
+        }
       }
     });
 
     // On initial app start, check if a session exists and fetch role
-    _fetchUserRole(supabase.auth.currentUser?.id);
+    // This is handled by the initialSession event in the listener above,
+    // but a direct check might be useful for scenarios where the listener might not fire immediately.
+    // However, the `initialSession` event is generally reliable.
+    // Keeping this for robustness in case `onAuthStateChange` sometimes misses `initialSession` on a hot restart.
+    if (supabase.auth.currentUser != null) {
+      _fetchUserRole(supabase.auth.currentUser?.id);
+    }
   }
 
   // Function to fetch the user's role from the profiles table
@@ -99,10 +117,8 @@ class _MyAppState extends State<MyApp> {
       // If response is received and 'role' is not null
       if (response['role'] != null) {
         _userRole.value = response['role'] as String;
-        print('DEBUG: User role fetched: ${_userRole.value}');
       } else {
         // If profile found but 'role' column is null (should ideally not happen with proper registration)
-        print('User profile found for ID: $userId, but role is null. Not signing out.');
         _userRole.value = null; // Role is null, so reflect that
         snackbarKey.currentState?.showSnackBar(
           const SnackBar(
@@ -112,7 +128,6 @@ class _MyAppState extends State<MyApp> {
         );
       }
     } on PostgrestException catch (e) {
-      print('ERROR: PostgrestException during role fetch: ${e.message}');
       _userRole.value = null; // Set null on error
       snackbarKey.currentState?.showSnackBar(
         SnackBar(
@@ -121,9 +136,7 @@ class _MyAppState extends State<MyApp> {
         ),
       );
     } catch (e) {
-      print('ERROR: Unexpected error during role fetch: $e');
       _userRole.value = null; // Set null on error
-      // *** REMOVED: await supabase.auth.signOut(); from here ***
       snackbarKey.currentState?.showSnackBar(
         SnackBar(
           content: Text('An unexpected error occurred loading user data: ${e.toString()}. Please try again.'),
@@ -153,10 +166,13 @@ class _MyAppState extends State<MyApp> {
 
         // Existing routes:
         '/ai_diagnosis': (context) => const AiDiagnosisScreen(),
-        '/mechanic_map': (context) => const VehicleOwnerMapScreen(), // This is the driver's map
+        '/vehicle_owner_map': (context) => const VehicleOwnerMapScreen(), // Driver's map
         '/offline_guide': (context) => const OfflineGuideScreen(),
         '/settings': (context) => const SettingsScreen(),
         '/terms_conditions': (context) => const TermsConditionsScreen(),
+        '/chat_list': (context) => const ChatListScreen(), // Add the new chat list route
+        '/account': (context) => const AccountScreen(), // Add account screen route
+        '/mechanic_dashboard': (context) => const MechanicServiceRequestsScreen(), // NEW: Mechanic's Requests Screen
       },
       // Use onGenerateRoute for dynamic routing based on user state
       onGenerateRoute: (settings) {
@@ -182,7 +198,7 @@ class _MyAppState extends State<MyApp> {
                     return const VehicleOwnerMapScreen();
                   } else if (role == 'mechanic') {
                     // Navigate to the Mechanic's Dashboard for mechanics
-                    return const MechanicDashboardScreen();
+                    return const MechanicServiceRequestsScreen(); // Correctly redirect to mechanic's screen
                   } else {
                     // Fallback for unknown roles (shouldn't happen with proper registration)
                     return const Text('Unknown User Role. Please contact support.');
@@ -209,138 +225,186 @@ class NavigationDrawer extends StatelessWidget {
     final user = supabase.auth.currentUser;
     final bool isLoggedIn = user != null;
 
-    return Drawer(
-      child: ListView(
-        padding: EdgeInsets.zero, // Remove default ListView padding
-        children: <Widget>[
-          // Custom Drawer Header with app branding and user info
-          DrawerHeader(
-            decoration: const BoxDecoration(
-              color: Color.fromARGB(233, 214, 251, 250),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                CircleAvatar(
-                  radius: 30, // Adjust size as needed
-                  backgroundColor: Colors.white,
-                  child: Icon(
-                    isLoggedIn ? Icons.person_rounded : Icons.person_outline,
-                    size: 40,
-                    color: Colors.blue,
-                  ),
+    // Use a ValueListenableBuilder to react to role changes and update drawer dynamically
+    return ValueListenableBuilder<String?>(
+      valueListenable: (context.findAncestorStateOfType<_MyAppState>()?._userRole ?? ValueNotifier<String?>(null)),
+      builder: (context, currentRole, child) {
+        return Drawer(
+          child: ListView(
+            padding: EdgeInsets.zero, // Remove default ListView padding
+            children: <Widget>[
+              // Custom Drawer Header with app branding and user info
+              DrawerHeader(
+                decoration: const BoxDecoration(
+                  color: Color.fromARGB(233, 214, 251, 250),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  // 'user' is guaranteed non-null here due to 'isLoggedIn' check
-                  isLoggedIn ? (user.email ?? 'Logged In User') : 'Guest User', 
-                  style: const TextStyle(
-                    color: Colors.blue,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                if (isLoggedIn) // 'user.id' is guaranteed non-null within 'isLoggedIn' block
-                  Text(
-                    'ID: ${user.id.substring(0, 8)}...', // Display truncated ID for debugging
-                    style: const TextStyle(
-                      color: Colors.blueGrey,
-                      fontSize: 12,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    CircleAvatar(
+                      radius: 30, // Adjust size as needed
+                      backgroundColor: Colors.white,
+                      child: Icon(
+                        isLoggedIn ? Icons.person_rounded : Icons.person_outline,
+                        size: 40,
+                        color: Colors.blue,
+                      ),
                     ),
-                  ),
-              ],
-            ),
-          ),
-          // Navigation ListTiles for different app sections
-          ListTile(
-            leading: const Icon(Icons.home, color: Colors.blue),
-            title: const Text('Home'),
-            onTap: () {
-              Navigator.pop(context); // Close the drawer
-              Navigator.pushReplacementNamed(context, '/'); // Go to role-based home
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.support_agent, color: Colors.blue),
-            title: const Text('AI Diagnosis Chatbot'),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.pushReplacementNamed(context, '/ai_diagnosis');
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.map, color: Colors.blue),
-            title: const Text('Mechanic Map'), // This will be the Driver's map
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.pushReplacementNamed(context, '/mechanic_map'); // Route to VehicleOwnerMapScreen
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.menu_book, color: Colors.blue),
-            title: const Text('Offline Repair Guide'),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.pushReplacementNamed(context, '/offline_guide');
-            },
-          ),
-          ListTile(
-            leading: const Icon(Icons.settings, color: Colors.blue),
-            title: const Text('Settings'),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.pushReplacementNamed(context, '/settings');
-            },
-          ),
-          const Divider(color: Colors.blueGrey), // Divider for visual separation
+                    const SizedBox(height: 8),
+                    Text(
+                      // 'user' is guaranteed non-null here due to 'isLoggedIn' check
+                      isLoggedIn ? (user.email ?? 'Logged In User') : 'Guest User',
+                      style: const TextStyle(
+                        color: Colors.blue,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    if (isLoggedIn) // 'user.id' is guaranteed non-null within 'isLoggedIn' block
+                      Text(
+                        'ID: ${user.id.substring(0, 8)}...', // Display truncated ID for debugging
+                        style: const TextStyle(
+                          color: Colors.blueGrey,
+                          fontSize: 12,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              // Navigation ListTiles for different app sections
+              ListTile(
+                leading: const Icon(Icons.home, color: Colors.blue),
+                title: const Text('Home'),
+                onTap: () {
+                  Navigator.pop(context); // Close the drawer
+                  if (currentRole == 'driver') {
+                    Navigator.pushReplacementNamed(context, '/vehicle_owner_map');
+                  } else if (currentRole == 'mechanic') {
+                    Navigator.pushReplacementNamed(context, '/mechanic_dashboard');
+                  } else {
+                    // Fallback or unauthenticated home
+                    Navigator.pushReplacementNamed(context, '/'); // This will hit onGenerateRoute
+                  }
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.support_agent, color: Colors.blue),
+                title: const Text('AI Diagnosis Chatbot'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.pushReplacementNamed(context, '/ai_diagnosis');
+                },
+              ),
+              // Conditional Map/Dashboard item based on role
+              if (currentRole == 'driver')
+                ListTile(
+                  leading: const Icon(Icons.map, color: Colors.blue),
+                  title: const Text('Find Mechanics'), // Driver's map to find mechanics
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.pushReplacementNamed(context, '/vehicle_owner_map');
+                  },
+                )
+              else if (currentRole == 'mechanic')
+                ListTile(
+                  leading: const Icon(Icons.dashboard, color: Colors.blue),
+                  title: const Text('Service Requests'), // Mechanic's dashboard for requests
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.pushReplacementNamed(context, '/mechanic_dashboard');
+                  },
+                ),
+              ListTile(
+                leading: const Icon(Icons.menu_book, color: Colors.blue),
+                title: const Text('Offline Repair Guide'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.pushReplacementNamed(context, '/offline_guide');
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.chat, color: Colors.blue), // Add new chat icon
+                title: const Text('Chats'), // Add new Chats list item
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.pushReplacementNamed(context, '/chat_list'); // Navigate to ChatListScreen
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.settings, color: Colors.blue),
+                title: const Text('Settings'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.pushReplacementNamed(context, '/settings');
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.assignment, color: Colors.blue),
+                title: const Text('Terms & Conditions'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.pushReplacementNamed(context, '/terms_conditions');
+                },
+              ),
+              const Divider(color: Colors.blueGrey), // Divider for visual separation
 
-          // Conditional authentication-related navigation
-          if (!isLoggedIn) ...[
-            ListTile(
-              leading: const Icon(Icons.login, color: Colors.blue),
-              title: const Text('Login'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.pushReplacementNamed(context, '/login');
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.app_registration, color: Colors.blue),
-              title: const Text('Register Account'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.pushReplacementNamed(context, '/register');
-              },
-            ),
-          ] else ...[
-            ListTile(
-              leading: const Icon(Icons.person, color: Colors.blue),
-              title: const Text('Profile Settings'),
-              onTap: () {
-                Navigator.pop(context);
-                // Use pushNamed here so ProfileScreen can be popped to return to home
-                Navigator.pushNamed(context, '/profile');
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.logout, color: Colors.red),
-              title: const Text('Logout'),
-              onTap: () async {
-                Navigator.pop(context); // Close the drawer
-                await supabase.auth.signOut();
-                // After logout, the onAuthStateChange listener will handle redirection to /login
-                snackbarKey.currentState?.showSnackBar(
-                  const SnackBar(
-                    content: Text('Logged out successfully.'),
-                    backgroundColor: Colors.green,
-                  ),
-                );
-              },
-            ),
-          ],
-        ],
-      ),
+              // Conditional authentication-related navigation
+              if (!isLoggedIn) ...[
+                ListTile(
+                  leading: const Icon(Icons.login, color: Colors.blue),
+                  title: const Text('Login'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.pushReplacementNamed(context, '/login');
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.app_registration, color: Colors.blue),
+                  title: const Text('Register Account'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.pushReplacementNamed(context, '/register');
+                  },
+                ),
+              ] else ...[
+                ListTile(
+                  leading: const Icon(Icons.person, color: Colors.blue),
+                  title: const Text('Profile Settings'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    // Use pushNamed here so ProfileScreen can be popped to return to home
+                    Navigator.pushNamed(context, '/profile');
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.account_circle, color: Colors.blue),
+                  title: const Text('Account Details'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.pushNamed(context, '/account');
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.logout, color: Colors.red),
+                  title: const Text('Logout'),
+                  onTap: () async {
+                    Navigator.pop(context); // Close the drawer
+                    await supabase.auth.signOut();
+                    // The onAuthStateChange listener in MyApp will handle redirection to /login
+                    snackbarKey.currentState?.showSnackBar(
+                      const SnackBar(
+                        content: Text('Logged out successfully.'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ],
+          ),
+        );
+      },
     );
   }
 }

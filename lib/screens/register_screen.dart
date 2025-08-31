@@ -94,19 +94,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Future<void> _rollbackRegistration(String? userId, AccountType? accountType) async {
     if (userId != null) {
       try {
-        print('DEBUG: Attempting rollback for user ID: $userId, account type: $accountType');
         await app_nav.supabase.from('profiles').delete().eq('id', userId);
-        print('DEBUG: Deleted profiles entry for user $userId during rollback.');
 
         if (accountType == AccountType.driver) {
           await app_nav.supabase.from('drivers').delete().eq('user_id', userId);
-          print('DEBUG: Deleted drivers entry for user $userId during rollback.');
         } else if (accountType == AccountType.mechanic) {
           await app_nav.supabase.from('mechanics').delete().eq('user_id', userId);
-          print('DEBUG: Deleted mechanics entry for user $userId during rollback.');
         }
       } catch (e) {
-        print('ERROR: Error during rollback for user $userId: $e');
         _showSnackBar('Failed to clean up incomplete registration. Please contact support.', Colors.orange);
       }
     }
@@ -133,27 +128,23 @@ class _RegisterScreenState extends State<RegisterScreen> {
           setState(() {
             _businessAddressController.text = address;
           });
-          print('DEBUG: Address found via Nominatim: $address');
         } else {
           setState(() {
             _businessAddressController.text = 'No address found for this location.';
             _showSnackBar('Address not found for selected coordinates. Please try another spot.', Colors.orange);
           });
-          print('WARNING: Nominatim found no address for lat: ${point.latitude}, lon: ${point.longitude}');
         }
       } else {
         setState(() {
           _businessAddressController.text = 'Error fetching address.';
           _showSnackBar('Server error fetching address: ${response.statusCode}', Colors.red);
         });
-        print('ERROR: Nominatim API call failed with status: ${response.statusCode}');
       }
     } catch (e) {
       setState(() {
         _businessAddressController.text = 'Network error occurred.';
         _showSnackBar('Network error fetching address: ${e.toString()}', Colors.red);
       });
-      print('ERROR: Network or parsing error during Nominatim call: $e');
     } finally {
       setState(() {
         _isGeocodingAddress = false; // Reset geocoding loading state
@@ -202,37 +193,30 @@ class _RegisterScreenState extends State<RegisterScreen> {
       final String fullName = _fullNameController.text.trim();
       final String phoneNumber = _phoneNumberController.text.trim();
 
-      print('DEBUG: Attempting Supabase signUp for email: $email');
       final AuthResponse authResponse = await app_nav.supabase.auth.signUp(
         email: email,
         password: password,
       );
-      print('DEBUG: Supabase signUp response received.');
 
       final User? user = authResponse.user;
 
       if (user == null) {
-        print('ERROR: Supabase signUp returned null user. Auth error: ${authResponse.session?.accessToken ?? 'No session token'}');
         _showSnackBar('Registration failed: User account could not be created. Check email/password requirements.', Colors.red);
         return;
       }
 
       userId = user.id;
-      print('DEBUG: User created with ID: $userId');
 
       // --- Step 2: Store Common Profile Details ---
-      print('DEBUG: Attempting to insert into profiles table for user ID: $userId');
       await app_nav.supabase.from('profiles').insert({
         'id': userId,
         'full_name': fullName,
         'phone_number': phoneNumber,
         'role': _selectedAccountType == AccountType.driver ? 'driver' : 'mechanic',
       });
-      print('DEBUG: Successfully inserted into profiles table.');
 
       // --- Step 3: Store Role-Specific Details ---
       if (_selectedAccountType == AccountType.driver) {
-        print('DEBUG: Attempting to insert into drivers table for user ID: $userId');
         await app_nav.supabase.from('drivers').insert({
           'user_id': userId,
           'first_name': _driverFirstNameController.text.trim(),
@@ -243,12 +227,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
           'year': _yearController.text.trim(),
           'license_plate': _licensePlateController.text.trim(),
         });
-        print('DEBUG: Successfully inserted into drivers table.');
         _showSnackBar('Driver account created successfully! Please verify your email.', Colors.green);
         _resetForm();
         if (mounted) Navigator.pushReplacementNamed(context, '/login');
       } else if (_selectedAccountType == AccountType.mechanic) {
-        print('DEBUG: Attempting to insert into mechanics table for user ID: $userId');
         await app_nav.supabase.from('mechanics').insert({
           'user_id': userId,
           'shop_name': _shopNameController.text.trim(),
@@ -264,27 +246,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
           'pricing_unit': _selectedPricingUnit?.toString().split('.').last,
           'minimum_charge_php': double.tryParse(_minimumChargeController.text.trim()),
         });
-        print('DEBUG: Successfully inserted into mechanics table.');
         _showSnackBar('Mechanic account created successfully! Please verify your email.', Colors.green);
         _resetForm();
         if (mounted) Navigator.pushReplacementNamed(context, '/login');
       }
     } on AuthException catch (e) {
-      print('ERROR: AuthException during registration: ${e.message}');
       _showSnackBar('Authentication error: ${e.message}', Colors.red);
     } on PostgrestException catch (e) {
-      print('ERROR: PostgrestException during registration: ${e.message}');
       _showSnackBar('Database error: ${e.message}', Colors.red);
       await _rollbackRegistration(userId, registeredAccountType);
     } catch (e) {
-      print('ERROR: Unexpected error during registration: ${e.toString()}');
       _showSnackBar('An unexpected error occurred during registration: ${e.toString()}', Colors.red);
       await _rollbackRegistration(userId, registeredAccountType);
     } finally {
       setState(() {
         _isRegistering = false;
       });
-      print('DEBUG: Registration process finished. _isRegistering set to false.');
     }
   }
 
