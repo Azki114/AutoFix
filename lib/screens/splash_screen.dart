@@ -1,8 +1,7 @@
-// lib/screens/splash_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:autofix/main.dart'; // To access the global 'supabase' client and snackbarKey
-import 'dart:async'; // Import StreamSubscription
+import 'dart:async'; // For Future.delayed
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -12,121 +11,90 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
-  // A subscription to listen to authentication state changes.
-  late final StreamSubscription<AuthState> _authStateSubscription;
-
   @override
   void initState() {
     super.initState();
     _redirect();
   }
 
-  @override
-  void dispose() {
-    _authStateSubscription.cancel(); // Cancel the subscription when the widget is disposed
-    super.dispose();
-  }
-
+  /// Determines the user's authentication state and role, then navigates
+  /// to the appropriate screen.
   Future<void> _redirect() async {
-    // Wait for the UI to be built to ensure Navigator context is available
-    await Future.delayed(Duration.zero);
+    // A brief delay allows Supabase to initialize and load any existing session
+    // from local storage, preventing a flicker to the login screen.
+    await Future.delayed(const Duration(milliseconds: 500));
 
-    if (!mounted) return; // Ensure the widget is still mounted
+    // If the widget is no longer in the tree, we should not proceed.
+    if (!mounted) return;
 
-    // Subscribe to authentication state changes to react in real-time
-    _authStateSubscription = supabase.auth.onAuthStateChange.listen((data) {
-      final AuthChangeEvent event = data.event;
-      final Session? session = data.session;
+    final session = supabase.auth.currentSession;
 
-      if (!mounted) return; // Ensure the widget is still mounted before performing UI operations
-
-      // Handle different authentication events
-      if (event == AuthChangeEvent.signedIn || event == AuthChangeEvent.initialSession) {
-        // If there's a session, try to fetch the user's role
-        if (session != null) {
-          _fetchAndNavigateUserRole(session.user.id);
-        } else {
-          // No session found, redirect to login
-          _navigateToLogin();
-        }
-      } else if (event == AuthChangeEvent.signedOut) {
-        // If signed out, always redirect to login
-        _navigateToLogin();
-      }
-      // For other events (e.g., password recovered, user updated),
-      // we don't need explicit navigation here as _fetchAndNavigateUserRole
-      // or subsequent screens will handle the state.
-    });
-
-    // Also perform an immediate check for the current user in case the listener
-    // doesn't fire immediately on hot restart or first launch after a quick close.
-    // This handles the initial state without waiting for the first auth event.
-    if (supabase.auth.currentUser == null) {
-      _navigateToLogin();
-    } else {
-      _fetchAndNavigateUserRole(supabase.auth.currentUser!.id);
+    if (session == null) {
+      // If there is no active session, navigate to the login screen.
+      _navigateTo('/login');
+      return;
     }
-  }
 
-  // Fetches the user's role and navigates to the appropriate screen
-  Future<void> _fetchAndNavigateUserRole(String userId) async {
+    // If a session exists, fetch the user's role to determine their home screen.
     try {
       final response = await supabase
           .from('profiles')
           .select('role')
-          .eq('id', userId)
+          .eq('id', session.user.id)
           .single();
 
       final String? role = response['role'] as String?;
 
-      if (!mounted) return; // Check again before navigating
+      if (!mounted) return; // Check again after the async call.
 
       if (role == 'driver') {
-        Navigator.of(context).pushReplacementNamed('/vehicle_owner_map');
+        _navigateTo('/vehicle_owner_map');
       } else if (role == 'mechanic') {
-        Navigator.of(context).pushReplacementNamed('/mechanic_dashboard');
+        _navigateTo('/mechanic_dashboard');
       } else {
-        // If role is null or unknown, assume incomplete profile or unassigned,
-        // navigate to profile to complete or re-login if necessary.
+        // If the role is missing or unknown, the user's profile might be incomplete.
+        // Navigate them to the profile screen to resolve it.
         snackbarKey.currentState?.showSnackBar(
           const SnackBar(
-            content: Text('Your user role could not be determined. Please complete your profile.'),
+            content: Text('Please complete your profile information.'),
             backgroundColor: Colors.orange,
           ),
         );
-        Navigator.of(context).pushReplacementNamed('/profile');
+        _navigateTo('/profile');
       }
     } on PostgrestException catch (e) {
+      // If there's an error fetching the profile (e.g., network issue),
+      // it's safest to send the user back to the login screen.
       if (!mounted) return;
       snackbarKey.currentState?.showSnackBar(
         SnackBar(
-          content: Text('Error loading user data: ${e.message}. Please re-login.'),
+          content: Text('Error loading user data: ${e.message}'),
           backgroundColor: Colors.red,
         ),
       );
-      _navigateToLogin(); // Redirect to login on error
+      _navigateTo('/login');
     } catch (e) {
       if (!mounted) return;
       snackbarKey.currentState?.showSnackBar(
         SnackBar(
-          content: Text('An unexpected error occurred: ${e.toString()}. Please re-login.'),
+          content: Text('An unexpected error occurred: ${e.toString()}'),
           backgroundColor: Colors.red,
         ),
       );
-      _navigateToLogin(); // Redirect to login on error
+      _navigateTo('/login');
     }
   }
 
-  // Helper to navigate to the login screen
-  void _navigateToLogin() {
+  /// A helper function to safely navigate to a new screen, replacing the current one.
+  void _navigateTo(String routeName) {
     if (mounted) {
-      Navigator.of(context).pushReplacementNamed('/login');
+      Navigator.of(context).pushReplacementNamed(routeName);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    // Display a simple loading indicator while the redirection logic runs
+    // The UI remains a simple loading indicator.
     return const Scaffold(
       body: Center(
         child: Column(
@@ -141,3 +109,4 @@ class _SplashScreenState extends State<SplashScreen> {
     );
   }
 }
+

@@ -27,6 +27,10 @@ dependencies:
   video_player: ^2.10.0
   image_picker: ^1.2.0
   permission_handler: ^12.0.1
+  sliding_up_panel: ^2.0.0+1
+  connectivity_plus: ^6.0.3
+  shared_preferences: ^2.5.3
+  collection: ^1.19.1
 
 dev_dependencies:
   flutter_test:

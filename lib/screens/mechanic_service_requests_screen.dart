@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:autofix/main.dart'; // For supabase client and snackbarKey
-import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'dart:async';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
+import 'package:geolocator/geolocator.dart'; // Import geolocator for GPS
 import 'package:autofix/screens/chat_list_screen.dart';
 import 'package:autofix/screens/account_screen.dart';
 import 'package:autofix/main.dart' as app_nav;
+import 'package:autofix/screens/mechanic_map_screen.dart'; // Import the dedicated map screen
 
+/// A screen for mechanics to view and manage service requests.
+/// It displays pending requests and requests they have accepted in separate tabs.
 class MechanicServiceRequestsScreen extends StatefulWidget {
   const MechanicServiceRequestsScreen({super.key});
 
@@ -21,208 +22,143 @@ class MechanicServiceRequestsScreen extends StatefulWidget {
 class _MechanicServiceRequestsScreenState
     extends State<MechanicServiceRequestsScreen>
     with SingleTickerProviderStateMixin {
+  late final Future<void> _initializeFuture;
   String? _currentMechanicId;
   String? _mechanicFullName;
-
   Stream<List<Map<String, dynamic>>>? _pendingRequestsStream;
   Stream<List<Map<String, dynamic>>>? _acceptedRequestsStream;
-
   late final TabController _tabController;
 
-  final MapController _mapController = MapController();
-  LatLng? _requesterLocationForMap;
-  LatLng? _mechanicLocationForMap;
-  final Set<Marker> _markers = {};
-  List<Polyline> _polylines = [];
-  bool _isMapLoading = false;
-  bool _isCalculatingRoute = false;
-  Map<String, dynamic>? _detailedAcceptedRequest;
+  LatLng? _mechanicLocation;
+  bool _isUpdatingLocation = false;
+  StreamSubscription<Position>? _locationStreamSubscription;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _initializeMechanic();
+    _initializeFuture = _initializeMechanic();
   }
 
   @override
   void dispose() {
     _tabController.dispose();
-    _mapController.dispose();
+    _locationStreamSubscription?.cancel();
     super.dispose();
   }
 
+  /// Fetches initial mechanic data and sets up real-time streams.
   Future<void> _initializeMechanic() async {
     final user = supabase.auth.currentUser;
     if (user == null) {
-      if (mounted) {
-        snackbarKey.currentState?.showSnackBar(
-          const SnackBar(content: Text('Mechanic not logged in.')),
-        );
-        Navigator.of(context).pushReplacementNamed('/login');
-      }
-      return;
+      Future.delayed(Duration.zero, () {
+        if (mounted) Navigator.of(context).pushReplacementNamed('/login');
+      });
+      throw 'Mechanic not logged in.';
     }
     _currentMechanicId = user.id;
-
-    if (_currentMechanicId == null) {
-      if (mounted) {
-        snackbarKey.currentState?.showSnackBar(
-          const SnackBar(
-              content: Text('Could not get mechanic ID. Please re-login.')),
-        );
-        Navigator.of(context).pushReplacementNamed('/login');
-      }
-      return;
+    
+    // REVISION: Get the live location from the phone on startup and update the database.
+    _mechanicLocation = await _updateAndGetLiveLocation();
+    if (_mechanicLocation == null && mounted) {
+       snackbarKey.currentState?.showSnackBar(const SnackBar(content: Text('Could not get your location. Please enable location services and restart.'), backgroundColor: Colors.red));
     }
 
-    try {
-      final profile = await supabase
-          .from('profiles')
-          .select('full_name, role')
-          .eq('id', _currentMechanicId!)
-          .single();
-
-      if (!mounted) return;
-
-      if (profile['role'] != 'mechanic') {
-        snackbarKey.currentState?.showSnackBar(
-          const SnackBar(content: Text('Unauthorized: Not a mechanic profile.')),
-        );
-        Navigator.of(context).pushReplacementNamed('/login');
-        return;
-      }
-
-      final mechanicData = await supabase
-          .from('mechanics')
-          .select('latitude, longitude')
-          .eq('user_id', _currentMechanicId!)
-          .single();
-
-      if (!mounted) return;
-
-      Future<List<Map<String, dynamic>>> fetchProfilesForRequests(
-          List<Map<String, dynamic>> requests) async {
-        if (requests.isEmpty) {
-          return [];
-        }
-        final userIds = requests
-            .map((req) => req['requester_id'] as String?)
-            .where((id) => id != null)
-            .toSet()
-            .toList();
-
-        if (userIds.isEmpty) {
-          return requests;
-        }
-
-        final profilesData = await supabase
-            .from('profiles')
-            .select('id, full_name')
-            .inFilter('id', userIds);
-
-        final profilesMap = {
-          for (var profile in profilesData) profile['id']: profile
-        };
-
-        return requests.map((req) {
-          return {
-            ...req,
-            'profiles':
-                profilesMap[req['requester_id']] ?? {'full_name': 'Unknown Owner'}
-          };
-        }).toList();
-      }
-
-      setState(() {
-        _mechanicFullName = profile['full_name'];
-        if (mechanicData['latitude'] != null &&
-            mechanicData['longitude'] != null) {
-          _mechanicLocationForMap =
-              LatLng(mechanicData['latitude'], mechanicData['longitude']);
-        }
-
-        _pendingRequestsStream = supabase
-            .from('service_requests')
-            .stream(primaryKey: ['id'])
-            .eq('status', 'pending')
-            .order('created_at', ascending: false)
-            .asyncMap(fetchProfilesForRequests);
-        
-        // CORRECTED SYNTAX: The second filter is chained correctly.
-        _acceptedRequestsStream = supabase
-            .from('service_requests')
-            .stream(primaryKey: ['id'])
-            .eq('mechanic_id', _currentMechanicId!) // Filter by mechanic in DB
-            .order('accepted_at', ascending: false)
-            .map((requests) {
-              // Apply second filter for 'accepted' status in Dart
-              return requests
-                  .where((req) => req['status'] == 'accepted')
-                  .toList();
-            })
-            .asyncMap(fetchProfilesForRequests); // Then fetch profiles
+    final profile = await supabase.from('profiles').select('full_name, role').eq('id', _currentMechanicId!).single();
+    if (profile['role'] != 'mechanic') {
+      Future.delayed(Duration.zero, () {
+        if (mounted) Navigator.of(context).pushReplacementNamed('/login');
       });
-    } on PostgrestException catch (e) {
-      if (mounted) {
-        snackbarKey.currentState?.showSnackBar(
-          SnackBar(
-              content: Text('Error fetching mechanic profile: ${e.message}')),
-        );
-        Navigator.of(context).pushReplacementNamed('/login');
+      throw 'Unauthorized: Not a mechanic profile.';
+    }
+
+    _mechanicFullName = profile['full_name'];
+    _initializeStreams();
+  }
+  
+  /// REVISION: New function to get the phone's current GPS location and update Supabase.
+  Future<LatLng?> _updateAndGetLiveLocation() async {
+    if (!mounted) return null;
+    setState(() => _isUpdatingLocation = true);
+
+    try {
+      // 1. Check and request location permissions
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        throw 'Location services are disabled.';
       }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          throw 'Location permissions are denied.';
+        }
+      }
+      if (permission == LocationPermission.deniedForever) {
+        throw 'Location permissions are permanently denied.';
+      }
+
+      // 2. Get current position
+      final position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      final currentLocation = LatLng(position.latitude, position.longitude);
+
+      // 3. Update Supabase with the new location
+      if (_currentMechanicId != null) {
+        await supabase
+          .from('mechanics')
+          .update({
+            'latitude': position.latitude,
+            'longitude': position.longitude,
+            'last_seen': DateTime.now().toIso8601String(), // It's good practice to store a timestamp
+          })
+          .eq('user_id', _currentMechanicId!);
+      }
+      
+      return currentLocation;
     } catch (e) {
       if (mounted) {
-        snackbarKey.currentState?.showSnackBar(
-          SnackBar(
-              content: Text('An unexpected error occurred: ${e.toString()}')),
-        );
-        Navigator.of(context).pushReplacementNamed('/login');
+        snackbarKey.currentState?.showSnackBar(SnackBar(content: Text('Location Error: ${e.toString()}'), backgroundColor: Colors.red));
+      }
+      return _mechanicLocation; // Return old location on error
+    } finally {
+      if (mounted) {
+        setState(() => _isUpdatingLocation = false);
       }
     }
   }
 
+  /// Sets up the real-time streams for pending and accepted requests.
+  void _initializeStreams() {
+    _pendingRequestsStream = supabase.from('service_requests').stream(primaryKey: ['id']).eq('status', 'pending').order('created_at', ascending: false).asyncMap(_fetchProfilesForRequests);
+    _acceptedRequestsStream = supabase.from('service_requests').stream(primaryKey: ['id']).eq('mechanic_id', _currentMechanicId!).order('accepted_at', ascending: false).map((requests) => requests.where((req) => req['status'] == 'accepted').toList()).asyncMap(_fetchProfilesForRequests);
+  }
+
+  /// Helper function to efficiently fetch profile information for a list of requests.
+  Future<List<Map<String, dynamic>>> _fetchProfilesForRequests(List<Map<String, dynamic>> requests) async {
+    if (requests.isEmpty) return [];
+    final userIds = requests.map((req) => req['requester_id'] as String?).where((id) => id != null).toSet().toList();
+    if (userIds.isEmpty) return requests;
+    final profilesData = await supabase.from('profiles').select('id, full_name').inFilter('id', userIds);
+    final profilesMap = {for (var p in profilesData) p['id']: p};
+    return requests.map((req) => {...req, 'profiles': profilesMap[req['requester_id']] ?? {'full_name': 'Unknown Owner'}}).toList();
+  }
+
+  // --- Core Business Logic (Accept, Cancel, Complete) ---
+
   Future<void> _acceptRequest(Map<String, dynamic> request) async {
-    final String? mechanicId = _currentMechanicId;
-
-    if (mechanicId == null || _mechanicLocationForMap == null) {
-      if (mounted) {
-        snackbarKey.currentState?.showSnackBar(
-          const SnackBar(
-              content: Text(
-                  'Mechanic ID or location not available. Cannot accept request.')),
-        );
-      }
+    final mechanicId = _currentMechanicId;
+    if (mechanicId == null) {
+      if(mounted) snackbarKey.currentState?.showSnackBar(const SnackBar(content: Text('Mechanic data not available.')));
       return;
     }
-
-    final List<Map<String, dynamic>> acceptedRequests = await supabase
-        .from('service_requests')
-        .select('id')
-        .eq('mechanic_id', mechanicId)
-        .eq('status', 'accepted');
-
-    if (acceptedRequests.isNotEmpty) {
-      if (mounted) {
-        snackbarKey.currentState?.showSnackBar(
-          const SnackBar(
-              content: Text(
-                  'You already have an active accepted request. Complete or cancel it first.')),
-        );
-      }
+    final acceptedRequests = await supabase.from('service_requests').select('id').eq('mechanic_id', mechanicId).eq('status', 'accepted');
+    if (acceptedRequests.isNotEmpty && mounted) {
+      snackbarKey.currentState?.showSnackBar(const SnackBar(content: Text('You already have an active request.')));
       return;
     }
-
-    int? etaMinutes = await _showEtaInputDialog();
-    if (etaMinutes == null) {
-      if (mounted) {
-        snackbarKey.currentState?.showSnackBar(
-          const SnackBar(
-              content: Text('Acceptance cancelled. ETA not provided.')),
-        );
-      }
-      return;
-    }
+    final etaMinutes = await _showEtaInputDialog();
+    if (etaMinutes == null) return;
 
     try {
       await supabase.from('service_requests').update({
@@ -231,130 +167,36 @@ class _MechanicServiceRequestsScreenState
         'accepted_at': DateTime.now().toIso8601String(),
         'eta_minutes': etaMinutes,
       }).eq('id', request['id']);
-
-      if (mounted) {
-        snackbarKey.currentState?.showSnackBar(
-          const SnackBar(
-              content:
-                  Text('Request accepted successfully! Owner will be notified.')),
-        );
-      }
+      if (mounted) snackbarKey.currentState?.showSnackBar(const SnackBar(content: Text('Request accepted successfully!')));
     } on PostgrestException catch (e) {
-      if (mounted) {
-        snackbarKey.currentState?.showSnackBar(
-          SnackBar(content: Text('Error accepting request: ${e.message}')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        snackbarKey.currentState?.showSnackBar(
-          SnackBar(
-              content: Text('An unexpected error occurred: ${e.toString()}')),
-        );
-      }
+      if (mounted) snackbarKey.currentState?.showSnackBar(SnackBar(content: Text('Error: ${e.message}')));
     }
   }
 
   Future<void> _cancelAcceptedRequest(Map<String, dynamic> request) async {
-    final String? mechanicId = _currentMechanicId;
-
-    if (mechanicId == null) return;
-
-    bool confirmCancel = await showDialog(
-          context: context,
-          builder: (BuildContext dialogContext) {
-            return AlertDialog(
-              title: const Text('Cancel Service?'),
-              content: const Text(
-                  'Are you sure you want to cancel this accepted service request? The owner will be notified.'),
-              actions: <Widget>[
-                TextButton(
-                  child: const Text('No'),
-                  onPressed: () => Navigator.of(dialogContext).pop(false),
-                ),
-                ElevatedButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(true),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                  child: const Text('Yes, Cancel',
-                      style: TextStyle(color: Colors.white)),
-                ),
-              ],
-            );
-          },
-        ) ??
-        false;
-
-    if (!confirmCancel) return;
+    final confirm = await _showConfirmationDialog(title: 'Cancel Service?', content: 'Are you sure you want to cancel this request?');
+    if (!confirm) return;
 
     try {
       await supabase.from('service_requests').update({
         'status': 'cancelled',
-        'cancelled_by': mechanicId,
+        'cancelled_by': _currentMechanicId,
         'cancelled_at': DateTime.now().toIso8601String(),
-        'cancel_reason': 'Mechanic cancelled service',
         'mechanic_id': null,
         'eta_minutes': null,
         'accepted_at': null,
       }).eq('id', request['id']);
-
       if (mounted) {
-        snackbarKey.currentState?.showSnackBar(
-          const SnackBar(
-              content: Text('Service request cancelled. Owner notified.')),
-        );
-        if (_detailedAcceptedRequest?['id'] == request['id']) {
-          setState(() {
-            _detailedAcceptedRequest = null;
-            _clearMap();
-          });
-        }
+        snackbarKey.currentState?.showSnackBar(const SnackBar(content: Text('Service request cancelled.')));
       }
     } on PostgrestException catch (e) {
-      if (mounted) {
-        snackbarKey.currentState?.showSnackBar(
-          SnackBar(content: Text('Error cancelling request: ${e.message}')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        snackbarKey.currentState?.showSnackBar(
-          SnackBar(
-              content: Text('An unexpected error occurred: ${e.toString()}')),
-        );
-      }
+      if (mounted) snackbarKey.currentState?.showSnackBar(SnackBar(content: Text('Error: ${e.message}')));
     }
   }
 
   Future<void> _completeServiceRequest(Map<String, dynamic> request) async {
-    final String? mechanicId = _currentMechanicId;
-
-    if (mechanicId == null) return;
-
-    bool confirmComplete = await showDialog(
-          context: context,
-          builder: (BuildContext dialogContext) {
-            return AlertDialog(
-              title: const Text('Complete Service?'),
-              content: const Text('Mark this service request as completed?'),
-              actions: <Widget>[
-                TextButton(
-                  child: const Text('No'),
-                  onPressed: () => Navigator.of(dialogContext).pop(false),
-                ),
-                ElevatedButton(
-                  onPressed: () => Navigator.of(dialogContext).pop(true),
-                  style:
-                      ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                  child: const Text('Yes, Complete',
-                      style: TextStyle(color: Colors.white)),
-                ),
-              ],
-            );
-          },
-        ) ??
-        false;
-
-    if (!confirmComplete) return;
+    final confirm = await _showConfirmationDialog(title: 'Complete Service?', content: 'Mark this request as completed?');
+    if (!confirm) return;
 
     try {
       await supabase.from('service_requests').update({
@@ -364,226 +206,241 @@ class _MechanicServiceRequestsScreenState
         'eta_minutes': null,
         'accepted_at': null,
       }).eq('id', request['id']);
-
       if (mounted) {
-        snackbarKey.currentState?.showSnackBar(
-          const SnackBar(
-              content: Text('Service request marked as completed.')),
-        );
-        if (_detailedAcceptedRequest?['id'] == request['id']) {
-          setState(() {
-            _detailedAcceptedRequest = null;
-            _clearMap();
-          });
-        }
+        snackbarKey.currentState?.showSnackBar(const SnackBar(content: Text('Service completed!')));
       }
     } on PostgrestException catch (e) {
-      if (mounted) {
-        snackbarKey.currentState?.showSnackBar(
-          SnackBar(content: Text('Error completing request: ${e.message}')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        snackbarKey.currentState?.showSnackBar(
-          SnackBar(
-              content: Text('An unexpected error occurred: ${e.toString()}')),
-        );
-      }
+      if (mounted) snackbarKey.currentState?.showSnackBar(SnackBar(content: Text('Error: ${e.message}')));
     }
   }
 
-  Future<int?> _showEtaInputDialog() async {
-    TextEditingController etaController = TextEditingController();
-    int? eta;
-    await showDialog<int>(
-      context: context,
-      builder: (BuildContext dialogContext) {
-        return AlertDialog(
-          title: const Text('Confirm Acceptance & ETA'),
-          content: TextField(
-            controller: etaController,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              hintText: 'Enter estimated arrival time in minutes',
-              labelText: 'ETA (minutes)',
-            ),
+  /// REVISION: This function now calls the new database function to get the location
+  /// as a simple text string, then parses it and navigates to the MechanicMapScreen.
+  void _navigateToMapView(Map<String, dynamic> request) async {
+    if (_mechanicLocation == null) {
+      snackbarKey.currentState?.showSnackBar(const SnackBar(content: Text('Your location is not available.')));
+      return;
+    }
+
+    try {
+      // Call the database function to get the location as a simple text string.
+      final locationString = await supabase.rpc(
+        'get_request_location_as_text',
+        params: {'request_id_input': request['id']}
+      ) as String;
+
+      // Parse the string "POINT(longitude latitude)"
+      final parts = locationString.substring(6, locationString.length - 1).split(' ');
+      final lon = double.parse(parts[0]);
+      final lat = double.parse(parts[1]);
+      final requesterLocation = LatLng(lat, lon);
+
+      if (mounted) {
+        Navigator.of(context).push(MaterialPageRoute(
+          builder: (context) => MechanicMapScreen(
+            mechanicLocation: _mechanicLocation!,
+            requesterLocation: requesterLocation,
           ),
-          actions: <Widget>[
-            TextButton(
-              child: const Text('Cancel'),
-              onPressed: () => Navigator.of(dialogContext).pop(),
+        ));
+      }
+    } catch (e) {
+      snackbarKey.currentState?.showSnackBar(SnackBar(content: Text('Failed to load map data: ${e.toString()}')));
+    }
+  }
+  
+  /// Shows a generic confirmation dialog.
+  Future<bool> _showConfirmationDialog({required String title, required String content}) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: Text(title),
+            content: Text(content),
+            actions: [
+              TextButton(child: const Text('No'), onPressed: () => Navigator.of(dialogContext).pop(false)),
+              ElevatedButton(onPressed: () => Navigator.of(dialogContext).pop(true), child: const Text('Yes')),
+            ],
+          ),
+        ) ?? false;
+  }
+
+  /// Shows the dialog for entering ETA.
+  Future<int?> _showEtaInputDialog() {
+    final etaController = TextEditingController();
+    return showDialog<int>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Enter ETA'),
+        content: TextField(
+          controller: etaController,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: 'ETA (minutes)'),
+        ),
+        actions: [
+          TextButton(child: const Text('Cancel'), onPressed: () => Navigator.of(dialogContext).pop()),
+          ElevatedButton(
+            child: const Text('Accept'),
+            onPressed: () {
+              final input = int.tryParse(etaController.text.trim());
+              if (input != null && input > 0) {
+                Navigator.of(dialogContext).pop(input);
+              } else {
+                snackbarKey.currentState?.showSnackBar(const SnackBar(content: Text('Please enter a valid number.')));
+              }
+            },
+          ),
+        ],
+      ),
+    ).whenComplete(() => etaController.dispose());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<void>(
+      future: _initializeFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+        if (snapshot.hasError) {
+          return Scaffold(body: Center(child: Text("Error initializing: ${snapshot.error}")));
+        }
+        return Scaffold(
+          appBar: AppBar(
+            title: Text('Mechanic: ${_mechanicFullName ?? 'Requests'}'),
+            backgroundColor: const Color.fromARGB(233, 214, 251, 250),
+            centerTitle: true,
+            elevation: 1,
+            bottom: TabBar(
+              controller: _tabController,
+              tabs: const [
+                Tab(text: 'Pending Requests', icon: Icon(Icons.access_time)),
+                Tab(text: 'My Accepted Services', icon: Icon(Icons.build)),
+              ],
             ),
-            ElevatedButton(
-              child: const Text('Accept'),
-              onPressed: () {
-                final input = int.tryParse(etaController.text.trim());
-                if (input != null && input > 0) {
-                  eta = input;
-                  Navigator.of(dialogContext).pop(eta);
-                } else {
-                  snackbarKey.currentState?.showSnackBar(
-                    const SnackBar(
-                        content: Text(
-                            'Please enter a valid positive number for ETA.')),
-                  );
-                }
-              },
-            ),
-          ],
+            actions: [
+              IconButton(icon: const Icon(Icons.message), onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ChatListScreen()))),
+              IconButton(icon: const Icon(Icons.person), onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AccountScreen()))),
+            ],
+          ),
+          drawer: const app_nav.NavigationDrawer(),
+          body: TabBarView(
+            controller: _tabController,
+            children: [
+              _PendingRequestsList(stream: _pendingRequestsStream!, onAccept: _acceptRequest),
+              _AcceptedRequestsList(
+                stream: _acceptedRequestsStream!,
+                onCancel: _cancelAcceptedRequest,
+                onComplete: _completeServiceRequest,
+                onViewOnMap: _navigateToMapView,
+              ),
+            ],
+          ),
+          // REVISION: Add a FloatingActionButton to manually refresh the location.
+          floatingActionButton: FloatingActionButton.extended(
+            onPressed: _isUpdatingLocation ? null : () async {
+              snackbarKey.currentState?.showSnackBar(const SnackBar(content: Text('Updating your location...')));
+              final newLocation = await _updateAndGetLiveLocation();
+              if (mounted && newLocation != null) {
+                setState(() {
+                  _mechanicLocation = newLocation;
+                });
+                snackbarKey.currentState?.showSnackBar(const SnackBar(content: Text('Location updated successfully!'), backgroundColor: Colors.green,));
+              }
+            },
+            label: const Text('Refresh Location'),
+            icon: _isUpdatingLocation 
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.0))
+                : const Icon(Icons.location_searching),
+          ),
         );
       },
     );
-    etaController.dispose();
-    return eta;
   }
+}
 
-  void _clearMap() {
-    if (!mounted) return;
-    setState(() {
-      _markers.clear();
-      _polylines.clear();
-      _requesterLocationForMap = null;
-      _detailedAcceptedRequest = null;
-    });
-  }
+// --- UI Sub-Widgets ---
 
-  Future<void> _displayAcceptedRequestOnMap(
-      Map<String, dynamic> request) async {
-    if (!mounted || _mechanicLocationForMap == null) return;
+class _PendingRequestsList extends StatelessWidget {
+  const _PendingRequestsList({required this.stream, required this.onAccept});
+  final Stream<List<Map<String, dynamic>>> stream;
+  final Function(Map<String, dynamic>) onAccept;
 
-    setState(() {
-      _isMapLoading = true;
-      _markers.clear();
-      _polylines.clear();
-      _detailedAcceptedRequest = request;
-    });
-
-    try {
-      final String requesterLocationString = request['requester_location'];
-      final parts = requesterLocationString
-          .substring(6, requesterLocationString.length - 1)
-          .split(' ');
-      final double lon = double.parse(parts[0]);
-      final double lat = double.parse(parts[1]);
-      _requesterLocationForMap = LatLng(lat, lon);
-
-      _markers.add(
-        Marker(
-          key: const Key('requesterLocation'),
-          point: _requesterLocationForMap!,
-          width: 80,
-          height: 80,
-          child: const Icon(Icons.location_on, color: Colors.blue, size: 40),
-        ),
-      );
-      _markers.add(
-        Marker(
-          key: const Key('mechanicCurrentLocation'),
-          point: _mechanicLocationForMap!,
-          width: 80,
-          height: 80,
-          child:
-              const Icon(Icons.directions_car, color: Colors.green, size: 40),
-        ),
-      );
-
-      _mapController.fitCamera(CameraFit.bounds(
-        bounds: LatLngBounds.fromPoints(
-            [_requesterLocationForMap!, _mechanicLocationForMap!]),
-        padding: const EdgeInsets.all(80.0),
-      ));
-
-      await _getDirections(_mechanicLocationForMap!, _requesterLocationForMap!);
-    } catch (e) {
-      if (mounted) {
-        snackbarKey.currentState?.showSnackBar(
-          SnackBar(
-              content: Text('Failed to load map for request: ${e.toString()}'),
-              backgroundColor: Colors.red),
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: stream,
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        if (snapshot.hasError) return Center(child: Text('Error: ${snapshot.error}'));
+        final requests = snapshot.data!;
+        if (requests.isEmpty) return const Center(child: Text('No pending service requests.'));
+        return ListView.builder(
+          itemCount: requests.length,
+          itemBuilder: (context, index) => _RequestCard(request: requests[index], isPending: true, onAccept: onAccept),
         );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isMapLoading = false;
-        });
-      }
-    }
+      },
+    );
   }
+}
 
-  Future<void> _getDirections(LatLng start, LatLng end) async {
-    if (!mounted) return;
-    setState(() {
-      _isCalculatingRoute = true;
-      _polylines.clear();
-    });
+class _AcceptedRequestsList extends StatelessWidget {
+  const _AcceptedRequestsList({
+    required this.stream,
+    required this.onCancel,
+    required this.onComplete,
+    required this.onViewOnMap,
+  });
 
-    final String osrmApiUrl =
-        'http://router.project-osrm.org/route/v1/driving/'
-        '${start.longitude},${start.latitude};${end.longitude},${end.latitude}'
-        '?overview=full&geometries=geojson';
+  final Stream<List<Map<String, dynamic>>> stream;
+  final Function(Map<String, dynamic>) onCancel;
+  final Function(Map<String, dynamic>) onComplete;
+  final Function(Map<String, dynamic>) onViewOnMap;
 
-    try {
-      final response = await http.get(Uri.parse(osrmApiUrl));
-      if (!mounted) return;
-
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> data = json.decode(response.body);
-        if (data['routes'] != null && data['routes'].isNotEmpty) {
-          final List<dynamic> coordinates =
-              data['routes'][0]['geometry']['coordinates'];
-
-          List<LatLng> routePoints = coordinates.map<LatLng>((coord) {
-            return LatLng(coord[1], coord[0]);
-          }).toList();
-
-          if (mounted) {
-            setState(() {
-              _polylines = [
-                Polyline(
-                  points: routePoints,
-                  color: Colors.green,
-                  strokeWidth: 5.0,
-                ),
-              ];
-            });
-          }
-        } else {
-          snackbarKey.currentState?.showSnackBar(
-            const SnackBar(
-                content: Text('No route found.'),
-                backgroundColor: Colors.orange),
-          );
-        }
-      } else {
-        snackbarKey.currentState?.showSnackBar(
-          SnackBar(
-              content: Text(
-                  'Failed to fetch directions: ${response.reasonPhrase}'),
-              backgroundColor: Colors.red),
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<Map<String, dynamic>>>(
+      stream: stream,
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
+        if (snapshot.hasError) return Center(child: Text('Error: ${snapshot.error}'));
+        final requests = snapshot.data!;
+        if (requests.isEmpty) return const Center(child: Text('You have no active service requests.'));
+        
+        return ListView.builder(
+          itemCount: requests.length,
+          itemBuilder: (context, index) => _RequestCard(
+            request: requests[index],
+            isPending: false,
+            onCancel: onCancel,
+            onComplete: onComplete,
+            onViewOnMap: onViewOnMap,
+          ),
         );
-      }
-    } catch (e) {
-      snackbarKey.currentState?.showSnackBar(
-        SnackBar(
-            content: Text('Error getting directions: ${e.toString()}'),
-            backgroundColor: Colors.red),
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isCalculatingRoute = false;
-        });
-      }
-    }
+      },
+    );
   }
+}
 
-  Widget _buildRequestCard(Map<String, dynamic> request,
-      {required bool isPending}) {
-    final requesterName = (request['profiles'] != null)
-        ? request['profiles']['full_name'] as String? ?? 'Unknown Owner'
-        : 'Loading...';
+class _RequestCard extends StatelessWidget {
+  const _RequestCard({
+    required this.request,
+    required this.isPending,
+    this.onAccept,
+    this.onCancel,
+    this.onComplete,
+    this.onViewOnMap,
+  });
+
+  final Map<String, dynamic> request;
+  final bool isPending;
+  final Function(Map<String, dynamic>)? onAccept;
+  final Function(Map<String, dynamic>)? onCancel;
+  final Function(Map<String, dynamic>)? onComplete;
+  final Function(Map<String, dynamic>)? onViewOnMap;
+
+  @override
+  Widget build(BuildContext context) {
+    final requesterName = request['profiles']?['full_name'] ?? 'Unknown Owner';
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
@@ -594,309 +451,38 @@ class _MechanicServiceRequestsScreenState
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Request by: $requesterName',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
+            Text('Request by: $requesterName', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Text('Status: ${request['status'].toString().toUpperCase()}'),
-            if (request['requester_notes'] != null &&
-                request['requester_notes'].isNotEmpty)
+            if (request['requester_notes'] != null && request['requester_notes'].isNotEmpty)
               Text('Notes: ${request['requester_notes']}'),
+            if (!isPending && request['status'] == 'accepted') ...[
+              const SizedBox(height: 8),
+              Text('ETA: ${request['eta_minutes']} minutes'),
+              Text('Accepted At: ${DateTime.parse(request['accepted_at']).toLocal().toString().substring(0, 16)}'),
+            ],
+            const SizedBox(height: 16),
             if (isPending)
               Align(
                 alignment: Alignment.bottomRight,
                 child: ElevatedButton.icon(
-                  onPressed: () => _acceptRequest(request),
-                  icon: const Icon(Icons.check, color: Colors.white),
-                  label: const Text('Accept Request',
-                      style: TextStyle(color: Colors.white)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8)),
-                  ),
+                  onPressed: () => onAccept?.call(request),
+                  icon: const Icon(Icons.check),
+                  label: const Text('Accept Request'),
                 ),
               )
             else if (request['status'] == 'accepted')
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              Row(
                 children: [
-                  const SizedBox(height: 8),
-                  Text('ETA: ${request['eta_minutes']} minutes'),
-                  Text(
-                      'Accepted At: ${DateTime.parse(request['accepted_at']).toLocal().toString().substring(0, 16)}'),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      ElevatedButton.icon(
-                        onPressed: () => _cancelAcceptedRequest(request),
-                        icon: const Icon(Icons.cancel, color: Colors.white),
-                        label: const Text('Cancel',
-                            style: TextStyle(color: Colors.white)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8)),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton.icon(
-                        onPressed: () => _completeServiceRequest(request),
-                        icon: const Icon(Icons.done_all, color: Colors.white),
-                        label: const Text('Complete',
-                            style: TextStyle(color: Colors.white)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8)),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton.icon(
-                        onPressed: () => _displayAcceptedRequestOnMap(request),
-                        icon: const Icon(Icons.map, color: Colors.white),
-                        label: const Text('View on Map',
-                            style: TextStyle(color: Colors.white)),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.teal,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8)),
-                        ),
-                      ),
-                    ],
-                  ),
+                  Expanded(child: ElevatedButton.icon(onPressed: () => onCancel?.call(request), icon: const Icon(Icons.cancel), label: const Text('Drop'))),
+                  const SizedBox(width: 8),
+                  Expanded(child: ElevatedButton.icon(onPressed: () => onComplete?.call(request), icon: const Icon(Icons.done_all), label: const Text('Done'))),
+                  const SizedBox(width: 8),
+                  Expanded(child: ElevatedButton.icon(onPressed: () => onViewOnMap?.call(request), icon: const Icon(Icons.map), label: const Text('Map'))),
                 ],
               ),
           ],
         ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_currentMechanicId == null ||
-        _pendingRequestsStream == null ||
-        _acceptedRequestsStream == null) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          'Mechanic: ${_mechanicFullName ?? 'Requests'}',
-          style:
-              const TextStyle(fontWeight: FontWeight.bold, color: Colors.blue),
-        ),
-        backgroundColor: const Color.fromARGB(233, 214, 251, 250),
-        centerTitle: true,
-        elevation: 1,
-        leading: Builder(
-          builder: (BuildContext context) {
-            return IconButton(
-              icon: const Icon(Icons.menu, color: Colors.blue),
-              onPressed: () {
-                Scaffold.of(context).openDrawer();
-              },
-            );
-          },
-        ),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: 'Pending Requests', icon: Icon(Icons.access_time)),
-            Tab(text: 'My Accepted Services', icon: Icon(Icons.build)),
-          ],
-          labelColor: Colors.blue,
-          unselectedLabelColor: Colors.grey,
-          indicatorColor: Colors.blue,
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.message, color: Colors.blue),
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (context) => const ChatListScreen()),
-              );
-            },
-            tooltip: 'Chat List',
-          ),
-          IconButton(
-            icon: const Icon(Icons.person, color: Colors.blue),
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (context) => const AccountScreen()),
-              );
-            },
-            tooltip: 'Account',
-          ),
-        ],
-      ),
-      drawer: const app_nav.NavigationDrawer(),
-      body: TabBarView(
-        controller: _tabController,
-        children: [
-          // Pending Requests Tab
-          StreamBuilder<List<Map<String, dynamic>>>(
-            stream: _pendingRequestsStream,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (snapshot.hasError) {
-                return Center(child: Text('Error: ${snapshot.error}'));
-              }
-              if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                return const Center(
-                    child: Text('No pending service requests.'));
-              }
-              final pendingRequests = snapshot.data!;
-              return ListView.builder(
-                itemCount: pendingRequests.length,
-                itemBuilder: (context, index) {
-                  return _buildRequestCard(pendingRequests[index],
-                      isPending: true);
-                },
-              );
-            },
-          ),
-
-          // My Accepted Services Tab
-          StreamBuilder<List<Map<String, dynamic>>>(
-            stream: _acceptedRequestsStream,
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (snapshot.hasError) {
-                return Center(child: Text('Error: ${snapshot.error}'));
-              }
-              if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                return const Center(
-                    child: Text(
-                        'You have no active accepted service requests.'));
-              }
-              final acceptedRequests = snapshot.data!;
-              return Stack(
-                children: [
-                  ListView.builder(
-                    itemCount: acceptedRequests.length,
-                    itemBuilder: (context, index) {
-                      return _buildRequestCard(acceptedRequests[index],
-                          isPending: false);
-                    },
-                  ),
-                  if (_detailedAcceptedRequest != null &&
-                      _requesterLocationForMap != null &&
-                      _mechanicLocationForMap != null)
-                    Positioned.fill(
-                      child: Card(
-                        margin: const EdgeInsets.all(16.0),
-                        elevation: 8,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16)),
-                        child: Column(
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.all(8.0),
-                              child: Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Flexible(
-                                    child: Text(
-                                      'Routing to Request #${_detailedAcceptedRequest!['id'].toString().substring(0, 8)}',
-                                      style: const TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  IconButton(
-                                    icon: const Icon(Icons.close),
-                                    onPressed: _clearMap,
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Expanded(
-                              child: _isMapLoading || _isCalculatingRoute
-                                  ? const Center(
-                                      child: CircularProgressIndicator())
-                                  : FlutterMap(
-                                      mapController: _mapController,
-                                      options: MapOptions(
-                                        initialCameraFit: CameraFit.bounds(
-                                          bounds: LatLngBounds.fromPoints([
-                                            _requesterLocationForMap!,
-                                            _mechanicLocationForMap!
-                                          ]),
-                                          padding: const EdgeInsets.all(80.0),
-                                        ),
-                                      ),
-                                      children: [
-                                        TileLayer(
-                                          urlTemplate:
-                                              "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-                                          userAgentPackageName:
-                                              'com.autofix.app',
-                                        ),
-                                        MarkerLayer(
-                                            markers: _markers.toList()),
-                                        PolylineLayer(polylines: _polylines),
-                                      ],
-                                    ),
-                            ),
-                            Padding(
-                              padding: const EdgeInsets.all(8.0),
-                              child: Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceEvenly,
-                                children: [
-                                  ElevatedButton.icon(
-                                    onPressed: () => _cancelAcceptedRequest(
-                                        _detailedAcceptedRequest!),
-                                    icon: const Icon(Icons.cancel,
-                                        color: Colors.white),
-                                    label: const Text('Cancel',
-                                        style: TextStyle(color: Colors.white)),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.red,
-                                      shape: RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(8)),
-                                    ),
-                                  ),
-                                  ElevatedButton.icon(
-                                    onPressed: () => _completeServiceRequest(
-                                        _detailedAcceptedRequest!),
-                                    icon: const Icon(Icons.done_all,
-                                        color: Colors.white),
-                                    label: const Text('Complete',
-                                        style: TextStyle(color: Colors.white)),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.blue,
-                                      shape: RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(8)),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                ],
-              );
-            },
-          ),
-        ],
       ),
     );
   }
