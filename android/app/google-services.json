@@ -1,0 +1,49 @@
+{
+  "project_info": {
+    "project_number": "316319349097",
+    "firebase_url": "https://autofix-mdt22-default-rtdb.firebaseio.com",
+    "project_id": "autofix-mdt22",
+    "storage_bucket": "autofix-mdt22.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:316319349097:android:5d14d5195a4e633f96e5f8",
+        "android_client_info": {
+          "package_name": "com.autofix"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDJDCIC8p7Rp26cMblatqZVoH9yfFQXpHw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:316319349097:android:04589c4efaef067796e5f8",
+        "android_client_info": {
+          "package_name": "com.example.autofix"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDJDCIC8p7Rp26cMblatqZVoH9yfFQXpHw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

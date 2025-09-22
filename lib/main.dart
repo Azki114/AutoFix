@@ -1,9 +1,12 @@
 // lib/main.dart
+import 'dart:async'; // Import for StreamSubscription
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import flutter_dotenv
+import 'package:firebase_core/firebase_core.dart'; // Import Firebase Core
 
-// --- app's screen imports ---
+// --- App's screen imports ---
 import 'package:autofix/screens/login_screen.dart';
 import 'package:autofix/screens/register_screen.dart';
 import 'package:autofix/screens/profile_screen.dart'; // User Profile Screen
@@ -19,12 +22,20 @@ import 'package:autofix/screens/settings_screen.dart';
 import 'package:autofix/screens/terms_conditions_screen.dart';
 import 'package:autofix/screens/account_screen.dart'; // Account screen from previous update
 
+// --- App Services ---
+import 'package:autofix/services/notification_service.dart';
+import 'package:autofix/services/request_notifier.dart';
+
+
 // Global Supabase client instance
 late final SupabaseClient supabase;
 
 // Define a global key for the Scaffold Messenger to show SnackBars from anywhere
 final GlobalKey<ScaffoldMessengerState> snackbarKey =
     GlobalKey<ScaffoldMessengerState>();
+
+// Create a single, globally accessible instance of the notifier
+final RequestNotifier requestNotifier = RequestNotifier();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized(); // Required for async initialization
@@ -48,6 +59,12 @@ Future<void> main() async {
   );
   supabase = Supabase.instance.client; // Get the client instance after initialization
 
+  // Initialize Firebase for push notifications
+  await Firebase.initializeApp();
+  // Initialize the notification service to handle FCM tokens and messages
+  await NotificationService().initialize();
+
+
   runApp(const MyApp());
 }
 
@@ -62,6 +79,8 @@ class _MyAppState extends State<MyApp> {
   // Define a value notifier to hold the user's role
   // This allows different parts of the app to react to role changes
   final ValueNotifier<String?> _userRole = ValueNotifier<String?>(null);
+  StreamSubscription? _requestStreamSubscription;
+
 
   @override
   void initState() {
@@ -77,6 +96,7 @@ class _MyAppState extends State<MyApp> {
         _fetchUserRole(session!.user.id);
       } else if (event == AuthChangeEvent.signedOut) {
         _userRole.value = null; // Clear role on sign out
+        _stopListeningForRequests(); // Stop listening when user logs out
         // When signed out, automatically redirect to login if not already there
         if (mounted) {
           Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
@@ -91,20 +111,24 @@ class _MyAppState extends State<MyApp> {
       }
     });
 
-    // On initial app start, check if a session exists and fetch role
-    // This is handled by the initialSession event in the listener above,
-    // but a direct check might be useful for scenarios where the listener might not fire immediately.
-    // However, the `initialSession` event is generally reliable.
-    // Keeping this for robustness in case `onAuthStateChange` sometimes misses `initialSession` on a hot restart.
     if (supabase.auth.currentUser != null) {
       _fetchUserRole(supabase.auth.currentUser?.id);
     }
   }
+  
+  @override
+  void dispose() {
+    _userRole.dispose();
+    _stopListeningForRequests();
+    super.dispose();
+  }
+
 
   // Function to fetch the user's role from the profiles table
   Future<void> _fetchUserRole(String? userId) async {
     if (userId == null) {
       _userRole.value = null; // No user, no role
+      _stopListeningForRequests();
       return;
     }
     try {
@@ -114,12 +138,20 @@ class _MyAppState extends State<MyApp> {
           .eq('id', userId)
           .single(); // Use single() to expect one row
 
-      // If response is received and 'role' is not null
       if (response['role'] != null) {
-        _userRole.value = response['role'] as String;
+        final role = response['role'] as String;
+        _userRole.value = role;
+        
+        // If the user is a mechanic, start listening for new service requests.
+        if (role == 'mechanic') {
+          _listenForNewServiceRequests();
+        } else {
+          _stopListeningForRequests(); // Ensure non-mechanics are not listening.
+        }
+
       } else {
-        // If profile found but 'role' column is null (should ideally not happen with proper registration)
         _userRole.value = null; // Role is null, so reflect that
+        _stopListeningForRequests();
         snackbarKey.currentState?.showSnackBar(
           const SnackBar(
             content: Text('Your profile\'s role could not be loaded. Please ensure your profile is complete.'),
@@ -129,6 +161,7 @@ class _MyAppState extends State<MyApp> {
       }
     } on PostgrestException catch (e) {
       _userRole.value = null; // Set null on error
+      _stopListeningForRequests();
       snackbarKey.currentState?.showSnackBar(
         SnackBar(
           content: Text('Error loading user data: ${e.message}. Please try refreshing or re-logging.'),
@@ -137,6 +170,7 @@ class _MyAppState extends State<MyApp> {
       );
     } catch (e) {
       _userRole.value = null; // Set null on error
+      _stopListeningForRequests();
       snackbarKey.currentState?.showSnackBar(
         SnackBar(
           content: Text('An unexpected error occurred loading user data: ${e.toString()}. Please try again.'),
@@ -145,6 +179,34 @@ class _MyAppState extends State<MyApp> {
       );
     }
   }
+
+  // Function to listen for new service requests for mechanics
+  void _listenForNewServiceRequests() {
+    // Cancel any existing subscription to prevent duplicates
+    _requestStreamSubscription?.cancel();
+    
+    _requestStreamSubscription = supabase
+        .from('service_requests')
+        .stream(primaryKey: ['id'])
+        .eq('status', 'pending') // Only listen for new pending requests
+        .listen((data) {
+      if (data.isNotEmpty) {
+        // A new request has appeared. Show the notification badge.
+        debugPrint("New service request detected!");
+        requestNotifier.show();
+      }
+    }, onError: (error) {
+        debugPrint("Error listening to service requests: $error");
+    });
+  }
+
+  // Function to stop the real-time listener
+  void _stopListeningForRequests() {
+    _requestStreamSubscription?.cancel();
+    _requestStreamSubscription = null;
+    requestNotifier.hide(); // Hide badge when not listening
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -187,7 +249,6 @@ class _MyAppState extends State<MyApp> {
                 } else {
                   // If user is authenticated but role is still null (loading or error)
                   if (role == null) {
-                    // This state should now be very brief, as _fetchUserRole will eventually resolve
                     return const Scaffold(
                       body: Center(
                         child: CircularProgressIndicator(),
@@ -201,7 +262,7 @@ class _MyAppState extends State<MyApp> {
                     return const MechanicServiceRequestsScreen(); // Correctly redirect to mechanic's screen
                   } else {
                     // Fallback for unknown roles (shouldn't happen with proper registration)
-                    return const Text('Unknown User Role. Please contact support.');
+                    return const Scaffold(body: Center(child: Text('Unknown User Role. Please contact support.')));
                   }
                 }
               },
@@ -253,7 +314,6 @@ class NavigationDrawer extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      // 'user' is guaranteed non-null here due to 'isLoggedIn' check
                       isLoggedIn ? (user.email ?? 'Logged In User') : 'Guest User',
                       style: const TextStyle(
                         color: Colors.blue,
@@ -261,7 +321,7 @@ class NavigationDrawer extends StatelessWidget {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    if (isLoggedIn) // 'user.id' is guaranteed non-null within 'isLoggedIn' block
+                    if (isLoggedIn)
                       Text(
                         'ID: ${user.id.substring(0, 8)}...', // Display truncated ID for debugging
                         style: const TextStyle(
@@ -283,7 +343,6 @@ class NavigationDrawer extends StatelessWidget {
                   } else if (currentRole == 'mechanic') {
                     Navigator.pushReplacementNamed(context, '/mechanic_dashboard');
                   } else {
-                    // Fallback or unauthenticated home
                     Navigator.pushReplacementNamed(context, '/'); // This will hit onGenerateRoute
                   }
                 },
@@ -307,12 +366,25 @@ class NavigationDrawer extends StatelessWidget {
                   },
                 )
               else if (currentRole == 'mechanic')
-                ListTile(
-                  leading: const Icon(Icons.dashboard, color: Colors.blue),
-                  title: const Text('Service Requests'), // Mechanic's dashboard for requests
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.pushReplacementNamed(context, '/mechanic_dashboard');
+                ValueListenableBuilder<bool>(
+                  valueListenable: requestNotifier,
+                  builder: (context, hasNewRequest, child) {
+                    return ListTile(
+                      leading: const Icon(Icons.dashboard, color: Colors.blue),
+                      title: const Text('Service Requests'),
+                      trailing: hasNewRequest
+                          ? const CircleAvatar(
+                              radius: 12,
+                              backgroundColor: Colors.red,
+                              child: Text('!', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+                            )
+                          : null,
+                      onTap: () {
+                        requestNotifier.hide();
+                        Navigator.pop(context);
+                        Navigator.pushReplacementNamed(context, '/mechanic_dashboard');
+                      },
+                    );
                   },
                 ),
               ListTile(
@@ -324,11 +396,11 @@ class NavigationDrawer extends StatelessWidget {
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.chat, color: Colors.blue), // Add new chat icon
-                title: const Text('Chats'), // Add new Chats list item
+                leading: const Icon(Icons.chat, color: Colors.blue),
+                title: const Text('Chats'),
                 onTap: () {
                   Navigator.pop(context);
-                  Navigator.pushReplacementNamed(context, '/chat_list'); // Navigate to ChatListScreen
+                  Navigator.pushReplacementNamed(context, '/chat_list');
                 },
               ),
               ListTile(
@@ -373,7 +445,6 @@ class NavigationDrawer extends StatelessWidget {
                   title: const Text('Profile Settings'),
                   onTap: () {
                     Navigator.pop(context);
-                    // Use pushNamed here so ProfileScreen can be popped to return to home
                     Navigator.pushNamed(context, '/profile');
                   },
                 ),
@@ -391,7 +462,6 @@ class NavigationDrawer extends StatelessWidget {
                   onTap: () async {
                     Navigator.pop(context); // Close the drawer
                     await supabase.auth.signOut();
-                    // The onAuthStateChange listener in MyApp will handle redirection to /login
                     snackbarKey.currentState?.showSnackBar(
                       const SnackBar(
                         content: Text('Logged out successfully.'),
@@ -408,3 +478,4 @@ class NavigationDrawer extends StatelessWidget {
     );
   }
 }
+

@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:autofix/main.dart' as app_nav;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:autofix/main.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
@@ -906,7 +905,7 @@ class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
                         minZoom: 2.0,
                         maxZoom: 18.0,
                         onPositionChanged: (pos, hasGesture) {
-                          if (mounted) _currentMapCenter = pos.center!;
+                          if (mounted) _currentMapCenter = pos.center;
                         },
                       ),
                       children: [
