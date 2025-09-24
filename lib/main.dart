@@ -1,4 +1,3 @@
-// lib/main.dart
 import 'dart:async'; // Import for StreamSubscription
 
 import 'package:flutter/material.dart';
@@ -14,6 +13,7 @@ import 'package:autofix/screens/splash_screen.dart'; // For initial loading/redi
 import 'package:autofix/screens/vehicle_owner_map_screen.dart'; // Driver's map
 import 'package:autofix/screens/mechanic_service_requests_screen.dart'; // MECHANIC'S NEW DEDICATED SCREEN
 import 'package:autofix/screens/chat_list_screen.dart'; // Import the new ChatListScreen
+import 'package:autofix/screens/service_history_screen.dart'; // Import the new ServiceHistoryScreen
 
 // --- Existing app screens ---
 import 'package:autofix/screens/ai_diagnosis_screen.dart';
@@ -36,6 +36,10 @@ final GlobalKey<ScaffoldMessengerState> snackbarKey =
 
 // Create a single, globally accessible instance of the notifier
 final RequestNotifier requestNotifier = RequestNotifier();
+
+// NEW: Create a global key for the Navigator
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized(); // Required for async initialization
@@ -76,58 +80,40 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  // Define a value notifier to hold the user's role
-  // This allows different parts of the app to react to role changes
   final ValueNotifier<String?> _userRole = ValueNotifier<String?>(null);
   StreamSubscription? _requestStreamSubscription;
+  StreamSubscription<AuthState>? _authSubscription;
 
 
   @override
   void initState() {
     super.initState();
-    // Listen to authentication state changes
-    supabase.auth.onAuthStateChange.listen((data) {
-      final AuthChangeEvent event = data.event;
+    // REFACTORED: Use a single, reliable listener for all auth changes.
+    _authSubscription = supabase.auth.onAuthStateChange.listen((data) {
       final Session? session = data.session;
-
-      // Handle different authentication events
-      if (event == AuthChangeEvent.signedIn || event == AuthChangeEvent.userUpdated) {
-        // 'session' is guaranteed non-null here due to AuthChangeEvent.signedIn/userUpdated
-        _fetchUserRole(session!.user.id);
-      } else if (event == AuthChangeEvent.signedOut) {
-        _userRole.value = null; // Clear role on sign out
-        _stopListeningForRequests(); // Stop listening when user logs out
-        // When signed out, automatically redirect to login if not already there
-        if (mounted) {
-          Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
-        }
-      } else if (event == AuthChangeEvent.initialSession) {
-        // Handle initial session to set role if already logged in
-        if (session != null) {
-          _fetchUserRole(session.user.id);
-        } else {
-          _userRole.value = null;
-        }
+      if (session == null) {
+        _userRole.value = null;
+        _stopListeningForRequests();
+        // Use the global navigatorKey to navigate reliably without a context.
+        navigatorKey.currentState?.pushNamedAndRemoveUntil('/login', (route) => false);
+      } else {
+        // When a user signs in or the initial session is loaded, fetch their role.
+        _fetchUserRole(session.user.id);
       }
     });
-
-    if (supabase.auth.currentUser != null) {
-      _fetchUserRole(supabase.auth.currentUser?.id);
-    }
   }
   
   @override
   void dispose() {
     _userRole.dispose();
-    _stopListeningForRequests();
+    _authSubscription?.cancel();
+    _requestStreamSubscription?.cancel();
     super.dispose();
   }
 
-
-  // Function to fetch the user's role from the profiles table
   Future<void> _fetchUserRole(String? userId) async {
     if (userId == null) {
-      _userRole.value = null; // No user, no role
+      _userRole.value = null;
       _stopListeningForRequests();
       return;
     }
@@ -136,21 +122,20 @@ class _MyAppState extends State<MyApp> {
           .from('profiles')
           .select('role')
           .eq('id', userId)
-          .single(); // Use single() to expect one row
+          .single();
 
       if (response['role'] != null) {
         final role = response['role'] as String;
         _userRole.value = role;
         
-        // If the user is a mechanic, start listening for new service requests.
         if (role == 'mechanic') {
           _listenForNewServiceRequests();
         } else {
-          _stopListeningForRequests(); // Ensure non-mechanics are not listening.
+          _stopListeningForRequests();
         }
 
       } else {
-        _userRole.value = null; // Role is null, so reflect that
+        _userRole.value = null;
         _stopListeningForRequests();
         snackbarKey.currentState?.showSnackBar(
           const SnackBar(
@@ -159,39 +144,29 @@ class _MyAppState extends State<MyApp> {
           ),
         );
       }
-    } on PostgrestException catch (e) {
-      _userRole.value = null; // Set null on error
-      _stopListeningForRequests();
-      snackbarKey.currentState?.showSnackBar(
-        SnackBar(
-          content: Text('Error loading user data: ${e.message}. Please try refreshing or re-logging.'),
-          backgroundColor: Colors.red,
-        ),
-      );
     } catch (e) {
-      _userRole.value = null; // Set null on error
+      _userRole.value = null;
       _stopListeningForRequests();
-      snackbarKey.currentState?.showSnackBar(
-        SnackBar(
-          content: Text('An unexpected error occurred loading user data: ${e.toString()}. Please try again.'),
-          backgroundColor: Colors.red,
-        ),
-      );
+      if(mounted){
+        snackbarKey.currentState?.showSnackBar(
+          SnackBar(
+            content: Text('An error occurred loading user data: ${e.toString()}.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
-  // Function to listen for new service requests for mechanics
   void _listenForNewServiceRequests() {
-    // Cancel any existing subscription to prevent duplicates
     _requestStreamSubscription?.cancel();
     
     _requestStreamSubscription = supabase
         .from('service_requests')
         .stream(primaryKey: ['id'])
-        .eq('status', 'pending') // Only listen for new pending requests
+        .eq('status', 'pending')
         .listen((data) {
       if (data.isNotEmpty) {
-        // A new request has appeared. Show the notification badge.
         debugPrint("New service request detected!");
         requestNotifier.show();
       }
@@ -200,84 +175,44 @@ class _MyAppState extends State<MyApp> {
     });
   }
 
-  // Function to stop the real-time listener
   void _stopListeningForRequests() {
     _requestStreamSubscription?.cancel();
     _requestStreamSubscription = null;
-    requestNotifier.hide(); // Hide badge when not listening
+    requestNotifier.hide();
   }
-
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      scaffoldMessengerKey: snackbarKey, // Assign the global key for snackbars
+      scaffoldMessengerKey: snackbarKey,
+      navigatorKey: navigatorKey, // Assign the global key for navigation
       title: 'AutoFix App',
       theme: ThemeData(
         primarySwatch: Colors.blue,
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
-      // Define initial routes. SplashScreen handles initial routing based on auth state.
       initialRoute: '/splash',
       routes: {
         '/splash': (context) => const SplashScreen(),
         '/login': (context) => const LoginScreen(),
         '/register': (context) => const RegisterScreen(),
-        '/profile': (context) => const ProfileScreen(), // User Profile Screen
-
-        // Existing routes:
+        '/profile': (context) => const ProfileScreen(),
         '/ai_diagnosis': (context) => const AiDiagnosisScreen(),
-        '/vehicle_owner_map': (context) => const VehicleOwnerMapScreen(), // Driver's map
+        '/vehicle_owner_map': (context) => const VehicleOwnerMapScreen(),
         '/offline_guide': (context) => const OfflineGuideScreen(),
         '/settings': (context) => const SettingsScreen(),
         '/terms_conditions': (context) => const TermsConditionsScreen(),
-        '/chat_list': (context) => const ChatListScreen(), // Add the new chat list route
-        '/account': (context) => const AccountScreen(), // Add account screen route
-        '/mechanic_dashboard': (context) => const MechanicServiceRequestsScreen(), // NEW: Mechanic's Requests Screen
+        '/chat_list': (context) => const ChatListScreen(),
+        '/account': (context) => const AccountScreen(),
+        '/mechanic_dashboard': (context) => const MechanicServiceRequestsScreen(),
+        '/service_history': (context) => const ServiceHistoryScreen(),
       },
-      // Use onGenerateRoute for dynamic routing based on user state
-      onGenerateRoute: (settings) {
-        if (settings.name == '/') {
-          return MaterialPageRoute(builder: (context) {
-            return ValueListenableBuilder<String?>(
-              valueListenable: _userRole,
-              builder: (context, role, child) {
-                // If no user is authenticated, always go to login
-                if (supabase.auth.currentUser == null) {
-                  return const LoginScreen();
-                } else {
-                  // If user is authenticated but role is still null (loading or error)
-                  if (role == null) {
-                    return const Scaffold(
-                      body: Center(
-                        child: CircularProgressIndicator(),
-                      ),
-                    );
-                  } else if (role == 'driver') {
-                    // Navigate to the Vehicle Owner's Map Screen for drivers
-                    return const VehicleOwnerMapScreen();
-                  } else if (role == 'mechanic') {
-                    // Navigate to the Mechanic's Dashboard for mechanics
-                    return const MechanicServiceRequestsScreen(); // Correctly redirect to mechanic's screen
-                  } else {
-                    // Fallback for unknown roles (shouldn't happen with proper registration)
-                    return const Scaffold(body: Center(child: Text('Unknown User Role. Please contact support.')));
-                  }
-                }
-              },
-            );
-          });
-        }
-        // Let other named routes be handled by the routes map
-        return null;
-      },
+      home: const SplashScreen(), // Let SplashScreen handle initial auth check and redirect
     );
   }
 }
 
-
-// NavigationDrawer widget, used across multiple screens for consistent navigation.
 class NavigationDrawer extends StatelessWidget {
   const NavigationDrawer({super.key});
 
@@ -286,15 +221,15 @@ class NavigationDrawer extends StatelessWidget {
     final user = supabase.auth.currentUser;
     final bool isLoggedIn = user != null;
 
-    // Use a ValueListenableBuilder to react to role changes and update drawer dynamically
+    final myAppState = context.findAncestorStateOfType<_MyAppState>();
+
     return ValueListenableBuilder<String?>(
-      valueListenable: (context.findAncestorStateOfType<_MyAppState>()?._userRole ?? ValueNotifier<String?>(null)),
+      valueListenable: myAppState?._userRole ?? ValueNotifier<String?>(null),
       builder: (context, currentRole, child) {
         return Drawer(
           child: ListView(
-            padding: EdgeInsets.zero, // Remove default ListView padding
+            padding: EdgeInsets.zero,
             children: <Widget>[
-              // Custom Drawer Header with app branding and user info
               DrawerHeader(
                 decoration: const BoxDecoration(
                   color: Color.fromARGB(233, 214, 251, 250),
@@ -304,7 +239,7 @@ class NavigationDrawer extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     CircleAvatar(
-                      radius: 30, // Adjust size as needed
+                      radius: 30,
                       backgroundColor: Colors.white,
                       child: Icon(
                         isLoggedIn ? Icons.person_rounded : Icons.person_outline,
@@ -323,7 +258,7 @@ class NavigationDrawer extends StatelessWidget {
                     ),
                     if (isLoggedIn)
                       Text(
-                        'ID: ${user.id.substring(0, 8)}...', // Display truncated ID for debugging
+                        'ID: ${user.id.substring(0, 8)}...',
                         style: const TextStyle(
                           color: Colors.blueGrey,
                           fontSize: 12,
@@ -332,18 +267,17 @@ class NavigationDrawer extends StatelessWidget {
                   ],
                 ),
               ),
-              // Navigation ListTiles for different app sections
               ListTile(
                 leading: const Icon(Icons.home, color: Colors.blue),
                 title: const Text('Home'),
                 onTap: () {
-                  Navigator.pop(context); // Close the drawer
+                  Navigator.pop(context);
                   if (currentRole == 'driver') {
                     Navigator.pushReplacementNamed(context, '/vehicle_owner_map');
                   } else if (currentRole == 'mechanic') {
                     Navigator.pushReplacementNamed(context, '/mechanic_dashboard');
                   } else {
-                    Navigator.pushReplacementNamed(context, '/'); // This will hit onGenerateRoute
+                    Navigator.pushReplacementNamed(context, '/splash');
                   }
                 },
               ),
@@ -355,17 +289,26 @@ class NavigationDrawer extends StatelessWidget {
                   Navigator.pushReplacementNamed(context, '/ai_diagnosis');
                 },
               ),
-              // Conditional Map/Dashboard item based on role
-              if (currentRole == 'driver')
-                ListTile(
+              // Conditional items based on role
+              if (currentRole == 'driver') ...[
+                 ListTile(
                   leading: const Icon(Icons.map, color: Colors.blue),
-                  title: const Text('Find Mechanics'), // Driver's map to find mechanics
+                  title: const Text('Find Mechanics'),
                   onTap: () {
                     Navigator.pop(context);
                     Navigator.pushReplacementNamed(context, '/vehicle_owner_map');
                   },
-                )
-              else if (currentRole == 'mechanic')
+                ),
+                 ListTile(
+                  leading: const Icon(Icons.history, color: Colors.blue),
+                  title: const Text('Service History'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.pushNamed(context, '/service_history');
+                  },
+                ),
+              ],
+               if (currentRole == 'mechanic')
                 ValueListenableBuilder<bool>(
                   valueListenable: requestNotifier,
                   builder: (context, hasNewRequest, child) {
@@ -419,9 +362,7 @@ class NavigationDrawer extends StatelessWidget {
                   Navigator.pushReplacementNamed(context, '/terms_conditions');
                 },
               ),
-              const Divider(color: Colors.blueGrey), // Divider for visual separation
-
-              // Conditional authentication-related navigation
+              const Divider(color: Colors.blueGrey),
               if (!isLoggedIn) ...[
                 ListTile(
                   leading: const Icon(Icons.login, color: Colors.blue),
@@ -460,7 +401,7 @@ class NavigationDrawer extends StatelessWidget {
                   leading: const Icon(Icons.logout, color: Colors.red),
                   title: const Text('Logout'),
                   onTap: () async {
-                    Navigator.pop(context); // Close the drawer
+                    Navigator.pop(context);
                     await supabase.auth.signOut();
                     snackbarKey.currentState?.showSnackBar(
                       const SnackBar(

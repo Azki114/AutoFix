@@ -1,9 +1,7 @@
-// lib/screens/profile_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:autofix/main.dart'; // To access the global 'supabase' client and 'snackbarKey'
 import 'package:autofix/main.dart' as app_nav; // For NavigationDrawer
-import 'package:autofix/screens/login_screen.dart'; // Import LoginScreen class
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -13,209 +11,350 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  Map<String, dynamic>? _profileData;
-  bool _isLoading = true;
+  late Future<Map<String, dynamic>> _profileFuture;
+  final String? _currentUserId = supabase.auth.currentUser?.id;
 
   @override
   void initState() {
     super.initState();
-    _fetchProfile();
+    if (_currentUserId != null) {
+      _profileFuture = _fetchUserProfile();
+    }
   }
 
-  Future<void> _fetchProfile() async {
-    final user = supabase.auth.currentUser;
-    if (user == null) {
-      snackbarKey.currentState?.showSnackBar(
-        const SnackBar(content: Text('No authenticated user found.')),
-      );
-      // Redirect to login if no user is authenticated
-      if (mounted) Navigator.pushReplacementNamed(context, '/login');
-      return;
-    }
+  Future<Map<String, dynamic>> _fetchUserProfile() async {
+    if (_currentUserId == null) throw 'User is not logged in.';
 
     try {
-      // Fetch the user's profile from the 'profiles' table
-      final response = await supabase
+      // Fetch the basic profile to determine the role
+      final profileRes = await supabase
           .from('profiles')
-          .select('*') // Select all columns for the profile
-          .eq('id', user.id) // Filter by the authenticated user's ID
-          .single(); // Expect only one row
+          .select('full_name, role')
+          .eq('id', _currentUserId!)
+          .single();
 
-      setState(() {
-        _profileData = response;
-        _isLoading = false;
-      });
-    } on PostgrestException catch (e) {
-      snackbarKey.currentState?.showSnackBar(
-        SnackBar(content: Text('Failed to load profile: ${e.message}')),
-      );
-      setState(() {
-        _isLoading = false;
-      });
-    } catch (e) {
-      snackbarKey.currentState?.showSnackBar(
-        SnackBar(content: Text('An unexpected error occurred: ${e.toString()}')),
-      );
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
+      final String role = profileRes['role'];
+      Map<String, dynamic> userProfileData = {'profile': profileRes};
 
-  Future<void> _logout() async {
-    try {
-      await supabase.auth.signOut();
-      if (mounted) {
-        // Clear navigation stack and go to login screen after logout
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (context) => const LoginScreen()),
-          (Route<dynamic> route) => false, // Remove all routes from the stack
-        );
+      // Based on the role, fetch role-specific data
+      if (role == 'driver') {
+        final driverRes = await supabase
+            .from('drivers')
+            .select('*')
+            .eq('user_id', _currentUserId!)
+            .single();
+        userProfileData['details'] = driverRes;
+      } else if (role == 'mechanic') {
+        final mechanicRes = await supabase
+            .from('mechanics')
+            .select('*')
+            .eq('user_id', _currentUserId!)
+            .single();
+        userProfileData['details'] = mechanicRes;
+
+        // NEW: Fetch all reviews for this mechanic
+        final reviewsRes = await supabase
+            .from('reviews')
+            .select('*, owner:profiles!owner_id(full_name)')
+            .eq('mechanic_id', _currentUserId!)
+            .order('created_at', ascending: false);
+        userProfileData['reviews'] = reviewsRes;
       }
-    } on AuthException catch (e) {
-      snackbarKey.currentState?.showSnackBar(
-        SnackBar(content: Text('Error logging out: ${e.message}')),
-      );
+
+      return userProfileData;
     } catch (e) {
-      snackbarKey.currentState?.showSnackBar(
-        SnackBar(content: Text('An unexpected error occurred during logout: ${e.toString()}')),
-      );
+      debugPrint("Error fetching user profile: $e");
+      throw 'Failed to load profile data.';
+    }
+  }
+  
+  // NEW: Function for a mechanic to add a reply to a review
+  Future<void> _addMechanicReply(String reviewId, String replyText) async {
+    try {
+      await supabase
+        .from('reviews')
+        .update({'mechanic_reply': replyText})
+        .eq('id', reviewId);
+      
+      if(mounted) {
+        snackbarKey.currentState?.showSnackBar(const SnackBar(
+          content: Text("Your reply has been posted."),
+          backgroundColor: Colors.green,
+        ));
+        // Refresh the profile to show the new reply
+        setState(() {
+          _profileFuture = _fetchUserProfile();
+        });
+      }
+
+    } catch (e) {
+      if (mounted) {
+         snackbarKey.currentState?.showSnackBar(SnackBar(
+          content: Text("Error posting reply: ${e.toString()}"),
+          backgroundColor: Colors.red,
+        ));
+      }
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('My Profile',
-            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
-        backgroundColor: const Color.fromARGB(233, 214, 251, 250),
-        centerTitle: true,
-        elevation: 1,
-      ),
-      drawer: const app_nav.NavigationDrawer(), // Attach the NavigationDrawer
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator()) // Show loading spinner
-          : _profileData == null // If profile data is null after loading
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Text(
-                        'Profile data not found or could not be loaded.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 16, color: Colors.blueGrey),
-                      ),
-                      const SizedBox(height: 20),
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.refresh, color: Colors.white),
-                        label: const Text('Retry Load Profile', style: TextStyle(color: Colors.white)),
-                        onPressed: _fetchProfile,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                      ),
-                      const SizedBox(height: 20),
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.logout, color: Colors.white),
-                        label: const Text('Logout', style: TextStyle(color: Colors.white)),
-                        onPressed: _logout,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              : SingleChildScrollView(
-                  padding: const EdgeInsets.all(24.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Center(
-                        child: CircleAvatar(
-                          radius: 60,
-                          backgroundColor: Colors.blue,
-                          child: Icon(
-                            _profileData!['role'] == 'driver' ? Icons.directions_car : Icons.build,
-                            size: 70,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      _buildProfileField('Full Name', _profileData!['full_name'] ?? 'N/A'),
-                      _buildProfileField('Email', _profileData!['email'] ?? 'N/A'),
-                      _buildProfileField('Phone Number', _profileData!['phone_number'] ?? 'N/A'),
-                      _buildProfileField('Role', _profileData!['role'] ?? 'N/A'),
-                      // Add more fields here if they are part of the 'profiles' table
-                      // For example, if you moved base_rate or service_radius to profiles
-                      // _buildProfileField('Service Radius (km)', _profileData!['service_radius_km']?.toString() ?? 'N/A'),
-                      // _buildProfileField('Base Rate (₱)', _profileData!['base_rate_php']?.toString() ?? 'N/A'),
-
-                      const SizedBox(height: 32),
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.edit, color: Colors.white),
-                        label: const Text('Edit Profile', style: TextStyle(fontSize: 18, color: Colors.white)),
-                        onPressed: () {
-                          // TODO: Implement profile editing logic here.
-                          // You would navigate to a new screen or show a dialog
-                          // for editing, then refresh this screen after saving.
-                          snackbarKey.currentState?.showSnackBar(
-                            const SnackBar(content: Text('Edit Profile functionality coming soon!')),
-                          );
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          elevation: 3,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.logout, color: Colors.white),
-                        label: const Text('Logout', style: TextStyle(fontSize: 18, color: Colors.white)),
-                        onPressed: _logout,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          elevation: 3,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+  // NEW: Dialog for submitting a mechanic's reply
+  void _showReplyDialog(String reviewId) {
+    final replyController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Reply to Review'),
+          content: TextField(
+            controller: replyController,
+            decoration: const InputDecoration(
+              labelText: 'Your public reply',
+              border: OutlineInputBorder(),
+            ),
+            maxLines: 4,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (replyController.text.trim().isNotEmpty) {
+                  Navigator.of(context).pop();
+                  _addMechanicReply(reviewId, replyController.text.trim());
+                }
+              },
+              child: const Text('Submit Reply'),
+            ),
+          ],
+        );
+      },
     );
   }
 
-  // Helper widget to display a single profile field
-  Widget _buildProfileField(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8.0),
+
+  @override
+  Widget build(BuildContext context) {
+    if (_currentUserId == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Profile')),
+        body: const Center(child: Text("Please log in to view your profile.")),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('My Profile'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () {
+              setState(() {
+                _profileFuture = _fetchUserProfile();
+              });
+            },
+          ),
+        ],
+      ),
+      drawer: const app_nav.NavigationDrawer(),
+      body: FutureBuilder<Map<String, dynamic>>(
+        future: _profileFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError || !snapshot.hasData) {
+            return Center(child: Text('Error: ${snapshot.error ?? "No data found."}'));
+          }
+
+          final data = snapshot.data!;
+          final role = data['profile']['role'];
+
+          if (role == 'driver') {
+            return _buildDriverProfile(data);
+          } else if (role == 'mechanic') {
+            return _buildMechanicProfile(data);
+          } else {
+            return const Center(child: Text('Unknown user role.'));
+          }
+        },
+      ),
+    );
+  }
+
+  // --- Profile Widgets ---
+
+  Widget _buildDriverProfile(Map<String, dynamic> data) {
+    final profile = data['profile'];
+    final details = data['details'];
+    return ListView(
+      padding: const EdgeInsets.all(16.0),
+      children: [
+        _buildProfileHeader(profile['full_name'], 'Vehicle Owner'),
+        const Divider(height: 32),
+        _buildInfoTile('Vehicle Type', details['vehicle_type']),
+        _buildInfoTile('Maker', details['maker']),
+        _buildInfoTile('Model', details['model']),
+        _buildInfoTile('Year', details['year']),
+        _buildInfoTile('License Plate', details['license_plate']),
+      ],
+    );
+  }
+
+  Widget _buildMechanicProfile(Map<String, dynamic> data) {
+    final profile = data['profile'];
+    final details = data['details'];
+    final reviews = (data['reviews'] as List).cast<Map<String, dynamic>>();
+
+    return ListView(
+      padding: const EdgeInsets.all(16.0),
+      children: [
+        _buildProfileHeader(profile['full_name'], 'Mechanic'),
+        const SizedBox(height: 16),
+        _buildRatingSummary(
+          details['average_rating']?.toDouble() ?? 0.0,
+          details['total_ratings'] ?? 0,
+        ),
+        const Divider(height: 32),
+        _buildInfoTile('Shop Name', details['shop_name']),
+        _buildInfoTile('Business Address', details['business_address']),
+        _buildInfoTile('Specialties', details['specialties']),
+        _buildInfoTile('Certifications', details['certifications']),
+        const Divider(height: 32),
+        Text('Customer Reviews', style: Theme.of(context).textTheme.headlineSmall),
+        const SizedBox(height: 16),
+        if (reviews.isEmpty)
+          const Center(child: Padding(
+            padding: EdgeInsets.all(16.0),
+            child: Text('You have no reviews yet.'),
+          ))
+        else
+          ...reviews.map((review) => _buildReviewCard(review)).toList(),
+      ],
+    );
+  }
+  
+  Widget _buildProfileHeader(String name, String role) {
+    return Column(
+      children: [
+        CircleAvatar(
+          radius: 50,
+          child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?', style: const TextStyle(fontSize: 40)),
+        ),
+        const SizedBox(height: 16),
+        Text(name, style: Theme.of(context).textTheme.headlineMedium, textAlign: TextAlign.center),
+        Text(role, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: Colors.grey)),
+      ],
+    );
+  }
+  
+  Widget _buildRatingSummary(double avgRating, int totalRatings) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: [
+            Column(
+              children: [
+                Text(avgRating.toStringAsFixed(1), style: Theme.of(context).textTheme.headlineMedium),
+                const Text('Average Rating'),
+              ],
+            ),
+            Column(
+              children: [
+                Row(
+                  children: List.generate(5, (index) => Icon(
+                    index < avgRating.round() ? Icons.star : Icons.star_border,
+                    color: Colors.amber,
+                  )),
+                ),
+                Text('$totalRatings Reviews'),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoTile(String title, dynamic value) {
+    return ListTile(
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+      subtitle: Text(value?.toString() ?? 'N/A'),
+    );
+  }
+
+  Widget _buildReviewCard(Map<String, dynamic> review) {
+    final ownerName = review['owner']?['full_name'] ?? 'Anonymous';
+    final mechanicReply = review['mechanic_reply'] as String?;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16.0),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(child: Text(ownerName, style: const TextStyle(fontWeight: FontWeight.bold))),
+                Row(
+                  children: List.generate(5, (index) => Icon(
+                    index < review['rating'] ? Icons.star : Icons.star_border,
+                    color: Colors.amber,
+                    size: 18,
+                  )),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Icon(Icons.verified, color: Colors.green.shade700, size: 16),
+                const SizedBox(width: 4),
+                Text('Verified Service', style: TextStyle(color: Colors.green.shade700, fontSize: 12, fontWeight: FontWeight.bold)),
+              ],
+            ),
+            if (review['comment'] != null && review['comment'].isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(review['comment']),
+            ],
+            const Divider(height: 24),
+            if (mechanicReply != null && mechanicReply.isNotEmpty)
+              _buildMechanicReply(mechanicReply)
+            else
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => _showReplyDialog(review['id']),
+                  child: const Text('Reply to this review'),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMechanicReply(String reply) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12.0),
+      decoration: BoxDecoration(
+        color: Colors.grey[200],
+        borderRadius: BorderRadius.circular(8),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            label,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.blueGrey),
-          ),
+          Text('Your Reply:', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey[700])),
           const SizedBox(height: 4),
-          Text(
-            value,
-            style: const TextStyle(fontSize: 18, color: Colors.black87),
-          ),
-          const Divider(), // Visual separator
+          Text(reply),
         ],
       ),
     );
   }
 }
+

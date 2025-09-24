@@ -1,10 +1,12 @@
-// lib/screens/chat_screen.dart
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:autofix/main.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
+import 'dart:async';
+import 'package:geolocator/geolocator.dart'; // Needed for getting user location for requests
+import 'package:latlong2/latlong.dart'; // Needed for LatLng type
 
 class ChatScreen extends StatefulWidget {
   final String chatId;
@@ -31,6 +33,8 @@ class _ChatScreenState extends State<ChatScreen> {
   final ImagePicker _picker = ImagePicker();
 
   bool _isUploadingMedia = false;
+  String? _currentUserRole; // State to hold the user's role
+  LatLng? _currentUserLocation; // State for user's location
 
   final Map<String, VideoPlayerController> _videoControllers = {};
   final Map<String, Future<void>> _initializeVideoPlayerFutures = {};
@@ -38,41 +42,57 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    // Configure stream to listen for all changes, including DELETE, using .stream()
-    // No filtering for 'deleted_for_users' is needed for hard delete
+    _subscribeToMessages();
+    _loadUserRole(); // Fetch the user's role when the screen loads
+  }
+
+  void _subscribeToMessages() {
     _messagesStream = supabase
         .from('messages')
-        .select('*')
+        .stream(primaryKey: ['id'])
         .eq('chat_id', widget.chatId)
-        .order('created_at', ascending: true)
-        .asStream(); // Use .stream() for real-time updates
+        .order('created_at', ascending: true);
+  }
 
-    // Listen to the stream to automatically scroll to the bottom on new messages
-    _messagesStream.listen((_) {
-      // Add a small delay to ensure the ListView has rendered the new item
-      Future.delayed(const Duration(milliseconds: 50), () {
-        _scrollToBottom();
-      });
-    });
+  Future<void> _loadUserRole() async {
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) return;
+
+      final response = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .single();
+      if (mounted) {
+        setState(() {
+          _currentUserRole = response['role'];
+        });
+      }
+    } catch (e) {
+      debugPrint("Error loading user role: $e");
+    }
   }
 
   @override
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
-    _videoControllers.forEach((key, controller) {
+    for (var controller in _videoControllers.values) {
       controller.dispose();
-    });
+    }
     super.dispose();
   }
 
   void _scrollToBottom() {
     if (_scrollController.hasClients) {
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+      Future.delayed(const Duration(milliseconds: 100), () {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      });
     }
   }
 
@@ -95,7 +115,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
     if (mediaFile != null) {
       await _uploadAndSendMessage(File(mediaFile.path), isVideo: isVideo);
-    } else {
+    } else if (mounted) {
       snackbarKey.currentState?.showSnackBar(
         const SnackBar(content: Text('No media selected.')),
       );
@@ -126,12 +146,13 @@ class _ChatScreenState extends State<ChatScreen> {
         messageType: isVideo ? 'video' : 'image',
         mediaUrl: publicUrl,
       );
-      // Confirm media message sent
     } on StorageException catch (e) {
+      if (!mounted) return;
       snackbarKey.currentState?.showSnackBar(
         SnackBar(content: Text('Error uploading media: ${e.message}')),
       );
     } catch (e) {
+      if (!mounted) return;
       snackbarKey.currentState?.showSnackBar(
         SnackBar(content: Text('An unexpected error occurred during media upload: ${e.toString()}')),
       );
@@ -172,22 +193,20 @@ class _ChatScreenState extends State<ChatScreen> {
         'message_type': messageType,
         'media_url': mediaUrl,
         'created_at': DateTime.now().toIso8601String(),
-        // 'deleted_for_users': [], // Removed for hard delete
       });
-
-      // Confirm insertion
 
       await supabase.from('chats').update({
         'last_message_at': DateTime.now().toIso8601String(),
         'last_message_content': content ?? text,
       }).eq('id', widget.chatId);
 
-      // The stream listener with a small delay should handle scrolling
     } on PostgrestException catch (e) {
+      if (!mounted) return;
       snackbarKey.currentState?.showSnackBar(
         SnackBar(content: Text('Error sending message: ${e.message}')),
       );
     } catch (e) {
+      if (!mounted) return;
       snackbarKey.currentState?.showSnackBar(
         SnackBar(content: Text('An unexpected error occurred: ${e.toString()}')),
       );
@@ -224,7 +243,6 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  // UPDATED: Function for hard delete
   Future<void> _clearConversation() async {
     bool confirmClear = await showDialog(
       context: context,
@@ -235,49 +253,118 @@ class _ChatScreenState extends State<ChatScreen> {
           actions: <Widget>[
             TextButton(
               child: const Text('Cancel'),
-              onPressed: () {
-                Navigator.of(dialogContext).pop(false);
-              },
+              onPressed: () => Navigator.of(dialogContext).pop(false),
             ),
             TextButton(
               child: const Text('Delete', style: TextStyle(color: Colors.red)),
-              onPressed: () {
-                Navigator.of(dialogContext).pop(true);
-              },
+              onPressed: () => Navigator.of(dialogContext).pop(true),
             ),
           ],
         );
       },
     ) ?? false;
 
-    if (!confirmClear) {
-      return;
-    }
+    if (!confirmClear) return;
 
     try {
-      // Perform a hard delete: delete all messages for this chat_id
       await supabase.from('messages').delete().eq('chat_id', widget.chatId);
-
-      // Also update the chat entry in the chats table to reflect deletion
       await supabase.from('chats').update({
-        'last_message_content': 'Conversation deleted', // Indicate conversation is empty
+        'last_message_content': 'Conversation deleted',
         'last_message_at': DateTime.now().toIso8601String(),
       }).eq('id', widget.chatId);
 
+      if (!mounted) return;
       snackbarKey.currentState?.showSnackBar(
         const SnackBar(content: Text('Conversation deleted successfully!')),
       );
-      // No need to navigate back if the stream correctly handles the empty state
-    } on PostgrestException catch (e) {
-      snackbarKey.currentState?.showSnackBar(
-        SnackBar(content: Text('Error deleting conversation: ${e.message}')),
-      );
     } catch (e) {
+      if (!mounted) return;
       snackbarKey.currentState?.showSnackBar(
-        SnackBar(content: Text('An unexpected error occurred while deleting: ${e.toString()}')),
+        SnackBar(content: Text('Error deleting conversation: ${e.toString()}')),
       );
     }
   }
+
+  // --- NEW: Service 
+  //t Logic ---
+
+  Future<void> _getCurrentLocationForRequest() async {
+    try {
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission != LocationPermission.whileInUse && permission != LocationPermission.always) {
+          throw Exception('Location permissions are denied.');
+        }
+      }
+      Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+      if(mounted){
+        setState(() {
+           _currentUserLocation = LatLng(position.latitude, position.longitude);
+        });
+      }
+    } catch (e) {
+      if(mounted){
+        snackbarKey.currentState?.showSnackBar(SnackBar(content: Text('Could not get location: $e'), backgroundColor: Colors.red));
+      }
+    }
+  }
+
+  Future<void> _requestServiceFromChat() async {
+    await _getCurrentLocationForRequest();
+    if (_currentUserLocation == null) {
+        snackbarKey.currentState?.showSnackBar(const SnackBar(content: Text('Could not get your location to make a request.'), backgroundColor: Colors.red));
+        return;
+    }
+
+    final notes = await _showNotesDialog();
+    if (notes == null) return; // User cancelled
+
+    try {
+      await supabase.from('service_requests').insert({
+        'requester_id': widget.currentUserId,
+        'mechanic_id': widget.chatPartnerId, // Assign directly to this mechanic
+        'requester_location': 'POINT(${_currentUserLocation!.longitude} ${_currentUserLocation!.latitude})',
+        'requester_notes': notes,
+        'status': 'pending', // Starts as pending for the mechanic to accept
+      });
+      if(mounted){
+         snackbarKey.currentState?.showSnackBar(const SnackBar(content: Text('Service request sent directly to this mechanic!'), backgroundColor: Colors.green));
+      }
+    } catch (e) {
+       if(mounted){
+        snackbarKey.currentState?.showSnackBar(SnackBar(content: Text('Failed to send request: $e'), backgroundColor: Colors.red));
+      }
+    }
+  }
+
+  Future<String?> _showNotesDialog() {
+    final notesController = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return AlertDialog(
+          title: const Text('Add Notes for Mechanic'),
+          content: TextField(
+            controller: notesController,
+            decoration: const InputDecoration(hintText: 'Describe your vehicle issue...'),
+            maxLines: 3,
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () => Navigator.of(dialogContext).pop(),
+            ),
+            ElevatedButton(
+              child: const Text('Send Request'),
+              onPressed: () => Navigator.of(dialogContext).pop(notesController.text.trim()),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -291,8 +378,25 @@ class _ChatScreenState extends State<ChatScreen> {
         centerTitle: true,
         elevation: 1,
         actions: [
+          // --- NEW: Conditional "Request Service" Button ---
+          if (_currentUserRole == 'driver')
+            Padding(
+              padding: const EdgeInsets.only(right: 8.0),
+              child: ElevatedButton.icon(
+                onPressed: _requestServiceFromChat,
+                icon: const Icon(Icons.build, size: 18),
+                label: const Text('Request Service'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                ),
+              ),
+            ),
           IconButton(
-            icon: const Icon(Icons.delete_forever, color: Colors.red), // Icon changed for hard delete
+            icon: const Icon(Icons.delete_forever, color: Colors.red),
             onPressed: _clearConversation,
             tooltip: 'Delete Conversation',
           ),
@@ -307,15 +411,35 @@ class _ChatScreenState extends State<ChatScreen> {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
+                
                 if (snapshot.hasError) {
-                  return Center(child: Text('Error: ${snapshot.error}'));
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Text(
+                          'Connection timed out. Please check your network.',
+                          style: TextStyle(color: Colors.red),
+                        ),
+                        const SizedBox(height: 16),
+                        ElevatedButton(
+                          onPressed: () {
+                            setState(() {
+                              _subscribeToMessages();
+                            });
+                          },
+                          child: const Text('Reconnect'),
+                        ),
+                      ],
+                    ),
+                  );
                 }
-                // When messages are deleted, snapshot.data will be empty
-                if (!snapshot.hasData || snapshot.data!.isEmpty) {
+
+                final messages = snapshot.data ?? [];
+                if (messages.isEmpty) {
                   return const Center(child: Text('Say hello! No messages yet.'));
                 }
 
-                final messages = snapshot.data!;
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   _scrollToBottom();
                 });
@@ -329,7 +453,7 @@ class _ChatScreenState extends State<ChatScreen> {
                     final isCurrentUser = message['sender_id'] == widget.currentUserId;
                     final messageType = message['message_type'] as String? ?? 'text';
                     final mediaUrl = message['media_url'] as String?;
-                    final messageId = message['id'] as String;
+                    final messageId = message['id'].toString();
 
                     if (messageType == 'video' && mediaUrl != null && !_videoControllers.containsKey(messageId)) {
                       final controller = VideoPlayerController.networkUrl(Uri.parse(mediaUrl));
@@ -406,7 +530,6 @@ class _ChatScreenState extends State<ChatScreen> {
                                                 },
                                                 child: CircleAvatar(
                                                   radius: 25,
-                                                  // ignore: deprecated_member_use
                                                   backgroundColor: Colors.black.withOpacity(0.6),
                                                   child: Icon(
                                                     videoController.value.isPlaying
@@ -484,12 +607,12 @@ class _ChatScreenState extends State<ChatScreen> {
                 const SizedBox(width: 8.0),
                 FloatingActionButton(
                   heroTag: 'send_button_tag',
-                  onPressed: _sendMessage,
+                  onPressed: () => _sendMessage(),
                   mini: true,
                   backgroundColor: Colors.blue,
                   child: const Icon(Icons.send, color: Colors.white),
                 ),
-                const SizedBox(width: 8.0),
+                const SizedBox(width: 4.0),
                 FloatingActionButton(
                   heroTag: 'image_button_tag',
                   onPressed: () => _showImageSourceSelectionSheet(isVideo: false),
@@ -497,7 +620,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   backgroundColor: Colors.blue,
                   child: const Icon(Icons.image, color: Colors.white),
                 ),
-                const SizedBox(width: 8.0),
+                 const SizedBox(width: 4.0),
                 FloatingActionButton(
                   heroTag: 'video_button_tag',
                   onPressed: () => _showImageSourceSelectionSheet(isVideo: true),
@@ -513,3 +636,4 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 }
+
