@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:autofix/main.dart'; // To access the global 'supabase' client and 'snackbarKey'
 import 'package:autofix/main.dart' as app_nav; // For NavigationDrawer
 

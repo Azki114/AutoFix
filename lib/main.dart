@@ -1,5 +1,7 @@
+// lib/main.dart
 import 'dart:async'; // Import for StreamSubscription
 
+import 'package:autofix/screens/service_history_screen.dart'; // <-- IMPORT THE NEW SCREEN
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import flutter_dotenv
@@ -13,7 +15,6 @@ import 'package:autofix/screens/splash_screen.dart'; // For initial loading/redi
 import 'package:autofix/screens/vehicle_owner_map_screen.dart'; // Driver's map
 import 'package:autofix/screens/mechanic_service_requests_screen.dart'; // MECHANIC'S NEW DEDICATED SCREEN
 import 'package:autofix/screens/chat_list_screen.dart'; // Import the new ChatListScreen
-import 'package:autofix/screens/service_history_screen.dart'; // Import the new ServiceHistoryScreen
 
 // --- Existing app screens ---
 import 'package:autofix/screens/ai_diagnosis_screen.dart';
@@ -206,7 +207,7 @@ class _MyAppState extends State<MyApp> {
         '/chat_list': (context) => const ChatListScreen(),
         '/account': (context) => const AccountScreen(),
         '/mechanic_dashboard': (context) => const MechanicServiceRequestsScreen(),
-        '/service_history': (context) => const ServiceHistoryScreen(),
+        '/service_history': (context) => const ServiceHistoryScreen(), // <-- NEW ROUTE ADDED
       },
       home: const SplashScreen(), // Let SplashScreen handle initial auth check and redirect
     );
@@ -299,7 +300,7 @@ class NavigationDrawer extends StatelessWidget {
                     Navigator.pushReplacementNamed(context, '/vehicle_owner_map');
                   },
                 ),
-                 ListTile(
+                 ListTile( // <-- NEW NAVIGATION ITEM ADDED
                   leading: const Icon(Icons.history, color: Colors.blue),
                   title: const Text('Service History'),
                   onTap: () {

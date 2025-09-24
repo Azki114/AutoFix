@@ -1,8 +1,9 @@
-// lib/screens/vehicle_owner_map_screen.dart
+import 'package:autofix/screens/reviews_screen.dart'; // <-- IMPORT THE NEW SCREEN
 import 'package:flutter/material.dart';
 import 'package:autofix/main.dart' as app_nav;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:autofix/main.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
@@ -566,6 +567,21 @@ class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
                 }
               },
             ),
+            // --- NEW "See Reviews" BUTTON ---
+            TextButton(
+              child: const Text('See Reviews', style: TextStyle(fontWeight: FontWeight.bold)),
+              onPressed: () {
+                Navigator.of(context).pop(); // Close the dialog first
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) => ReviewsScreen(
+                      mechanicId: mechanicId,
+                      shopName: shopName,
+                    ),
+                  ),
+                );
+              },
+            ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                   backgroundColor: Theme.of(context).colorScheme.primary,
@@ -574,7 +590,9 @@ class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
                       borderRadius: BorderRadius.circular(8))),
               onPressed: () {
                 Navigator.of(context).pop();
-                _requestService();
+                // This function is defined in the original file
+                // It needs access to the user's location which should be available in this screen's state
+                _requestService(mechanicId); 
               },
               child: const Text('REQUEST SERVICE'),
             ),
@@ -593,7 +611,7 @@ class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
     );
   }
 
-  Future<void> _requestService() async {
+  Future<void> _requestService(String mechanicId) async {
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -637,6 +655,7 @@ class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
 
       final newRequest = await supabase.from('service_requests').insert({
         'requester_id': _currentUserId,
+        'mechanic_id': mechanicId, // Directly assign the selected mechanic
         'requester_location':
             'POINT(${_userCurrentLocation!.longitude} ${_userCurrentLocation!.latitude})',
         'requester_notes': notes,
@@ -905,7 +924,7 @@ class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
                         minZoom: 2.0,
                         maxZoom: 18.0,
                         onPositionChanged: (pos, hasGesture) {
-                          if (mounted) _currentMapCenter = pos.center;
+                          if (mounted) _currentMapCenter = pos.center!;
                         },
                       ),
                       children: [

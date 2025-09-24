@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:autofix/main.dart'; // For supabase instance and snackbarKey
 
 class ServiceHistoryScreen extends StatefulWidget {
