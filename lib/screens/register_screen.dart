@@ -3,7 +3,6 @@ import 'dart:convert'; // For JSON decoding
 import 'package:flutter/material.dart';
 import 'package:autofix/main.dart' as app_nav;
 import 'package:supabase_flutter/supabase_flutter.dart';
-// import 'package:geocoding/geocoding.dart'; // Removed: No longer directly used for reverse geocoding
 import 'package:latlong2/latlong.dart';
 import 'package:autofix/screens/select_location_on_map_screen.dart';
 import 'package:autofix/screens/terms_conditions_screen.dart';
@@ -17,7 +16,6 @@ class RegisterScreen extends StatefulWidget {
 }
 
 enum AccountType { driver, mechanic }
-enum PricingUnit { kilometer, meters_500 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
@@ -46,15 +44,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final TextEditingController _specialtiesController = TextEditingController();
   final TextEditingController _yearsExperienceController = TextEditingController();
   final TextEditingController _businessAddressController = TextEditingController();
-  final TextEditingController _serviceRadiusController = TextEditingController();
-  final TextEditingController _baseRateController = TextEditingController();
-  PricingUnit? _selectedPricingUnit;
-  final TextEditingController _minimumChargeController = TextEditingController();
 
   LatLng? _mechanicLatitudeLongitude;
   bool _agreedToTerms = false;
   bool _isRegistering = false;
-  bool _isGeocodingAddress = false; // NEW: State for geocoding process
+  bool _isGeocodingAddress = false;
 
   @override
   void dispose() {
@@ -73,9 +67,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _specialtiesController.dispose();
     _yearsExperienceController.dispose();
     _businessAddressController.dispose();
-    _serviceRadiusController.dispose();
-    _baseRateController.dispose();
-    _minimumChargeController.dispose();
     super.dispose();
   }
 
@@ -107,16 +98,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
-  // NEW: Function to get a human-readable address from coordinates using Nominatim API
   Future<void> _getAddressFromNominatim(LatLng point) async {
     setState(() {
-      _isGeocodingAddress = true; // Set geocoding loading state
+      _isGeocodingAddress = true;
       _businessAddressController.text = 'Fetching address...';
     });
 
     final url = 'https://nominatim.openstreetmap.org/reverse?format=json&lat=${point.latitude}&lon=${point.longitude}';
-    // IMPORTANT: Add a User-Agent header as required by Nominatim's usage policy
-    // Replace 'your-app-name' and 'your-contact-info' with actual values.
     final headers = {'User-Agent': 'AutoFixApp (your-contact-email@example.com)'};
 
     try {
@@ -147,13 +135,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
       });
     } finally {
       setState(() {
-        _isGeocodingAddress = false; // Reset geocoding loading state
+        _isGeocodingAddress = false;
       });
     }
   }
 
   Future<void> _registerAccount() async {
-    if (_isRegistering || _isGeocodingAddress) return; // Prevent taps during any loading state
+    if (_isRegistering || _isGeocodingAddress) return;
 
     if (!_formKey.currentState!.validate()) {
       _showSnackBar('Please correct the errors in the form.', Colors.red);
@@ -173,8 +161,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
 
-    // Ensure address is resolved if mechanic
-    if (_selectedAccountType == AccountType.mechanic && _businessAddressController.text.contains('Fetching address') || _businessAddressController.text.contains('No address found')) {
+    if (_selectedAccountType == AccountType.mechanic && (_businessAddressController.text.contains('Fetching address') || _businessAddressController.text.contains('No address found'))) {
       _showSnackBar('Please wait for the address to be resolved or select a valid location.', Colors.red);
       return;
     }
@@ -207,7 +194,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       userId = user.id;
 
-      // --- Step 2: Store Common Profile Details ---
       await app_nav.supabase.from('profiles').insert({
         'id': userId,
         'full_name': fullName,
@@ -215,7 +201,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
         'role': _selectedAccountType == AccountType.driver ? 'driver' : 'mechanic',
       });
 
-      // --- Step 3: Store Role-Specific Details ---
       if (_selectedAccountType == AccountType.driver) {
         await app_nav.supabase.from('drivers').insert({
           'user_id': userId,
@@ -241,10 +226,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
           'business_address': _businessAddressController.text.trim(),
           'latitude': _mechanicLatitudeLongitude!.latitude,
           'longitude': _mechanicLatitudeLongitude!.longitude,
-          'service_radius_km': double.tryParse(_serviceRadiusController.text.trim()),
-          'base_rate_php': double.tryParse(_baseRateController.text.trim()),
-          'pricing_unit': _selectedPricingUnit?.toString().split('.').last,
-          'minimum_charge_php': double.tryParse(_minimumChargeController.text.trim()),
         });
         _showSnackBar('Mechanic account created successfully! Please verify your email.', Colors.green);
         _resetForm();
@@ -265,7 +246,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
-  // Resets all form fields and selections
   void _resetForm() {
     _formKey.currentState?.reset();
     _fullNameController.clear();
@@ -283,18 +263,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _specialtiesController.clear();
     _yearsExperienceController.clear();
     _businessAddressController.clear();
-    _serviceRadiusController.clear();
-    _baseRateController.clear();
-    _minimumChargeController.clear();
     setState(() {
       _selectedAccountType = null;
       _selectedVehicleType = null;
       _selectedBusinessType = null;
-      _selectedPricingUnit = null;
       _agreedToTerms = false;
       _passwordVisible = false;
       _mechanicLatitudeLongitude = null;
-      _isGeocodingAddress = false; // Reset geocoding state
+      _isGeocodingAddress = false;
     });
   }
 
@@ -325,8 +301,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   style: TextStyle(fontSize: 18, color: Colors.blueGrey),
                 ),
                 const SizedBox(height: 24),
-
-                // Common Fields
                 _buildTextField(_fullNameController, 'Full Name', 'Enter your full name', (value) {
                   if (value == null || value.isEmpty) {
                     return 'Please enter your full name';
@@ -384,8 +358,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   },
                 ),
                 const SizedBox(height: 24),
-
-                // Account Type Selection
                 const Text(
                   'Account Type:',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.blueGrey),
@@ -421,16 +393,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ],
                 ),
                 const SizedBox(height: 24),
-
-                // Conditional Fields based on Account Type
                 if (_selectedAccountType == AccountType.driver)
                   _buildDriverDetailsForm(),
                 if (_selectedAccountType == AccountType.mechanic)
                   _buildMechanicDetailsForm(),
-
                 const SizedBox(height: 24),
-
-                // Terms and Conditions
                 Row(
                   children: [
                     Checkbox(
@@ -461,10 +428,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   ],
                 ),
                 const SizedBox(height: 24),
-
-                // Register Button
                 ElevatedButton(
-                  onPressed: (_isRegistering || _isGeocodingAddress) ? null : _registerAccount, // Disable when registering or geocoding
+                  onPressed: (_isRegistering || _isGeocodingAddress) ? null : _registerAccount,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.blue,
                     padding: const EdgeInsets.symmetric(vertical: 16),
@@ -495,7 +460,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  // Helper method to build common TextField widgets
   Widget _buildTextField(TextEditingController controller, String label, String hint, String? Function(String?)? validator, {TextInputType keyboardType = TextInputType.text, bool enabled = true}) {
     return TextFormField(
       controller: controller,
@@ -511,7 +475,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  // --- Driver Details Form ---
   Widget _buildDriverDetailsForm() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -535,7 +498,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
           return null;
         }),
         const SizedBox(height: 24),
-
         const Text(
           'Vehicle Details:',
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blue),
@@ -603,7 +565,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  // --- Mechanic Details Form ---
   Widget _buildMechanicDetailsForm() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -667,18 +628,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blue),
         ),
         const SizedBox(height: 16),
-        // Display the selected address from map, make it read-only
         _buildTextField(
           _businessAddressController,
           'Business Address (from map)',
-          _mechanicLatitudeLongitude == null ? 'Select location on map below' : '', // Hint changes
+          _mechanicLatitudeLongitude == null ? 'Select location on map below' : '',
           (value) {
             if (value == null || value.isEmpty || _mechanicLatitudeLongitude == null || _businessAddressController.text.contains('No address found')) {
               return 'Please select your business address on the map.';
             }
             return null;
           },
-          enabled: false, // Make this field read-only
+          enabled: false,
         ),
         const SizedBox(height: 8),
         ElevatedButton.icon(
@@ -707,7 +667,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
               setState(() {
                 _mechanicLatitudeLongitude = selectedLatLng;
               });
-              // Call Nominatim for reverse geocoding
               await _getAddressFromNominatim(selectedLatLng);
             }
           },
@@ -721,62 +680,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
           ),
         ),
         const SizedBox(height: 16),
-        _buildTextField(_serviceRadiusController, 'Service Radius (km)', '30', (value) {
-          if (value == null || value.isEmpty) {
-            return 'Please enter service radius';
-          }
-          if (double.tryParse(value) == null || double.parse(value) <= 0) {
-            return 'Please enter a valid number for service radius';
-          }
-          return null;
-        }, keyboardType: TextInputType.number),
-        const SizedBox(height: 24),
-
-        const Text(
-          'Pricing (optional):',
-          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blue),
-        ),
-        const SizedBox(height: 16),
-        _buildTextField(_baseRateController, 'Base Rate (₱)', '30', null, keyboardType: TextInputType.number),
-        const SizedBox(height: 16),
-        const Text(
-          'Price per:',
-          style: TextStyle(fontSize: 16, color: Colors.blueGrey),
-        ),
-        Row(
-          children: [
-            Expanded(
-              child: RadioListTile<PricingUnit>(
-                title: const Text('Kilometer (₱10)'),
-                value: PricingUnit.kilometer,
-                groupValue: _selectedPricingUnit,
-                onChanged: (PricingUnit? value) {
-                  setState(() {
-                    _selectedPricingUnit = value;
-                  });
-                },
-                activeColor: Colors.blue,
-              ),
-            ),
-            Expanded(
-              child: RadioListTile<PricingUnit>(
-                title: const Text('500 meters (₱5)'),
-                value: PricingUnit.meters_500,
-                groupValue: _selectedPricingUnit,
-                onChanged: (PricingUnit? value) {
-                  setState(() {
-                    _selectedPricingUnit = value;
-                  });
-                },
-                activeColor: Colors.blue,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        _buildTextField(_minimumChargeController, 'Minimum Charge (₱)', '25', null, keyboardType: TextInputType.number),
-        const SizedBox(height: 24),
       ],
     );
   }
 }
+

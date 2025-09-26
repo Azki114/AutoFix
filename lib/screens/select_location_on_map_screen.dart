@@ -1,25 +1,33 @@
 // lib/screens/select_location_on_map_screen.dart
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart'; // For LatLng
-import 'package:geocoding/geocoding.dart'; // For reverse geocoding
+import 'package:latlong2/latlong.dart';
+import 'package:http/http.dart' as http;
 
 class SelectLocationOnMapScreen extends StatefulWidget {
-  // Optional: Pass an initial location if you want to center the map
-  // around the user's current location or a previous selection.
   final LatLng? initialLocation;
 
   const SelectLocationOnMapScreen({super.key, this.initialLocation});
 
   @override
-  State<SelectLocationOnMapScreen> createState() => _SelectLocationOnMapScreenState();
+  State<SelectLocationOnMapScreen> createState() =>
+      _SelectLocationOnMapScreenState();
 }
 
 class _SelectLocationOnMapScreenState extends State<SelectLocationOnMapScreen> {
-  // Changed default location to a more likely resolvable address in Manila (Rizal Park)
-  LatLng _selectedLocation = LatLng(14.5847, 120.9789); // Rizal Park, Manila, Philippines
-  String _addressDisplay = 'Drag map to select location'; // Updated hint
+  final MapController _mapController = MapController();
+  final TextEditingController _searchController = TextEditingController();
+  
+  LatLng _selectedLocation = LatLng(14.5995, 120.9842); // Default to Manila
+  String _addressDisplay = 'Drag map to select location';
   bool _isReverseGeocoding = false;
+
+  // State for search feature
+  Timer? _debounce;
+  List<Map<String, dynamic>> _suggestions = [];
+  bool _isSearching = false;
 
   @override
   void initState() {
@@ -27,44 +35,90 @@ class _SelectLocationOnMapScreenState extends State<SelectLocationOnMapScreen> {
     if (widget.initialLocation != null) {
       _selectedLocation = widget.initialLocation!;
     }
-    // Always attempt to reverse geocode the initial/default location
     _reverseGeocodeCurrentLocation();
+
+    _searchController.addListener(_onSearchChanged);
   }
 
-  // Function to reverse geocode the selected LatLng into an address string
+  @override
+  void dispose() {
+    _searchController.removeListener(_onSearchChanged);
+    _searchController.dispose();
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  void _onSearchChanged() {
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+    _debounce = Timer(const Duration(milliseconds: 500), () {
+      if (_searchController.text.length > 2) {
+        _fetchAutocompleteSuggestions(_searchController.text);
+      } else {
+        setState(() {
+          _suggestions = [];
+        });
+      }
+    });
+  }
+
+  Future<void> _fetchAutocompleteSuggestions(String query) async {
+    setState(() {
+      _isSearching = true;
+    });
+
+    final url = Uri.parse(
+        'https://nominatim.openstreetmap.org/search?q=$query&format=json&addressdetails=1&limit=5');
+    final headers = {'User-Agent': 'AutoFixApp/1.0'};
+
+    try {
+      final response = await http.get(url, headers: headers);
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body) as List;
+        setState(() {
+          _suggestions = List<Map<String, dynamic>>.from(data);
+        });
+      }
+    } catch (e) {
+      debugPrint("Error fetching suggestions: $e");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSearching = false;
+        });
+      }
+    }
+  }
+
   Future<void> _reverseGeocodeCurrentLocation() async {
     setState(() {
       _isReverseGeocoding = true;
-      _addressDisplay = 'Fetching address...'; // Temporary message
+      _addressDisplay = 'Fetching address...';
     });
+
+    final url = Uri.parse(
+        'https://nominatim.openstreetmap.org/reverse?format=json&lat=${_selectedLocation.latitude}&lon=${_selectedLocation.longitude}');
+    final headers = {'User-Agent': 'AutoFixApp/1.0'};
+
     try {
-      // Use placemarkFromCoordinates directly without 'geocoding.' prefix
-      List<Placemark> placemarks = await placemarkFromCoordinates(
-        _selectedLocation.latitude,
-        _selectedLocation.longitude,
-      );
-      if (placemarks.isNotEmpty) {
-        final Placemark place = placemarks.first;
-        // Construct a readable address string
-        _addressDisplay = [
-          place.street,
-          place.subLocality, // e.g., district
-          place.locality, // e.g., city/municipality
-          place.administrativeArea, // e.g., province/state
-          place.country,
-        ].where((element) => element != null && element.isNotEmpty).join(', ');
+      final response = await http.get(url, headers: headers);
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data != null && data['display_name'] != null) {
+          _addressDisplay = data['display_name'];
+        } else {
+          _addressDisplay = 'No address found for this location.';
+        }
       } else {
-        // If no address found, indicate that coordinates are primary
-        _addressDisplay = 'No street address found. Coordinates will be used.';
+        _addressDisplay = 'Error fetching address.';
       }
     } catch (e) {
-      // If an error occurs during fetching, show a more user-friendly message
-      _addressDisplay = 'Could not fetch address. Coordinates will be used.';
-      // Log the actual error for debugging
+      _addressDisplay = 'Network error occurred.';
     } finally {
-      setState(() {
-        _isReverseGeocoding = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isReverseGeocoding = false;
+        });
+      }
     }
   }
 
@@ -81,45 +135,99 @@ class _SelectLocationOnMapScreenState extends State<SelectLocationOnMapScreen> {
       body: Stack(
         children: [
           FlutterMap(
+            mapController: _mapController,
             options: MapOptions(
-              // Corrected: Use 'center' and 'zoom' directly
-              initialCenter: _selectedLocation, // Center map on initially selected or default location
-              initialZoom: 13.0,
-              // When the map moves, update the selected location to its new center
+              initialCenter: _selectedLocation,
+              initialZoom: 15.0,
               onPositionChanged: (pos, hasGesture) {
-                if (pos.center != _selectedLocation) {
+                if (hasGesture && pos.center != null) {
                   setState(() {
-                    _selectedLocation = pos.center;
-                    _reverseGeocodeCurrentLocation(); // Reverse geocode the new center
+                    _selectedLocation = pos.center!;
+                  });
+                  if (_debounce?.isActive ?? false) _debounce!.cancel();
+                  _debounce = Timer(const Duration(milliseconds: 500), () {
+                     _reverseGeocodeCurrentLocation();
                   });
                 }
-              },
-              // onTap is also useful if you want to tap anywhere to set the location
-              onTap: (tapPos, latLng) {
-                setState(() {
-                  _selectedLocation = latLng;
-                  _reverseGeocodeCurrentLocation();
-                });
               },
             ),
             children: [
               TileLayer(
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.autofix.app', // Your app's package name
+                userAgentPackageName: 'com.autofix.app',
               ),
-              // Removed MarkerLayer, using central Icon for selection indication
             ],
           ),
-          // Crosshair in the center to indicate the selection point
           const Center(
             child: Icon(
-              Icons.location_pin, // Use a pin icon to indicate the center selection
+              Icons.location_pin,
               color: Colors.red,
-              size: 40,
+              size: 50,
             ),
           ),
           Positioned(
-            top: 20,
+            top: 10,
+            left: 15,
+            right: 15,
+            child: Column(
+              children: [
+                Card(
+                  elevation: 4,
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      hintText: 'Search for an address...',
+                      prefixIcon: const Icon(Icons.search),
+                      suffixIcon: _searchController.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear),
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() {
+                                  _suggestions = [];
+                                });
+                              },
+                            )
+                          : null,
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.all(16),
+                    ),
+                  ),
+                ),
+                if (_isSearching) const LinearProgressIndicator(),
+                if (_suggestions.isNotEmpty)
+                  Card(
+                    elevation: 4,
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: _suggestions.length,
+                      itemBuilder: (context, index) {
+                        final suggestion = _suggestions[index];
+                        return ListTile(
+                          title: Text(suggestion['display_name']),
+                          onTap: () {
+                            final lat = double.parse(suggestion['lat']);
+                            final lon = double.parse(suggestion['lon']);
+                            final newLocation = LatLng(lat, lon);
+                            
+                            setState(() {
+                              _selectedLocation = newLocation;
+                              _suggestions = [];
+                            });
+                            _searchController.clear();
+                            _mapController.move(newLocation, 16.0);
+                             _reverseGeocodeCurrentLocation();
+                            FocusScope.of(context).unfocus();
+                          },
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Positioned(
+            bottom: 80,
             left: 20,
             right: 20,
             child: Card(
@@ -128,7 +236,6 @@ class _SelectLocationOnMapScreenState extends State<SelectLocationOnMapScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(12.0),
                 child: Column(
-                  mainAxisSize: MainAxisSize.min,
                   children: [
                     const Text(
                       'Selected Location:',
@@ -142,13 +249,6 @@ class _SelectLocationOnMapScreenState extends State<SelectLocationOnMapScreen> {
                             textAlign: TextAlign.center,
                             style: const TextStyle(fontSize: 14),
                           ),
-                    const SizedBox(height: 10),
-                    // Always show Lat/Lng clearly
-                    Text(
-                      'Lat: ${_selectedLocation.latitude.toStringAsFixed(6)}, Lng: ${_selectedLocation.longitude.toStringAsFixed(6)}',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 12, color: Colors.blueGrey, fontWeight: FontWeight.bold),
-                    ),
                   ],
                 ),
               ),
@@ -160,7 +260,6 @@ class _SelectLocationOnMapScreenState extends State<SelectLocationOnMapScreen> {
             right: 20,
             child: ElevatedButton(
               onPressed: () {
-                // Always return the selected coordinates
                 Navigator.pop(context, _selectedLocation);
               },
               style: ElevatedButton.styleFrom(
