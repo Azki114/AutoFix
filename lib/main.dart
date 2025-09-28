@@ -1,7 +1,7 @@
 // lib/main.dart
 import 'dart:async'; // Import for StreamSubscription
 
-import 'package:autofix/screens/service_history_screen.dart'; // <-- IMPORT THE NEW SCREEN
+import 'package:autofix/screens/service_history_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import flutter_dotenv
@@ -38,8 +38,11 @@ final GlobalKey<ScaffoldMessengerState> snackbarKey =
 // Create a single, globally accessible instance of the notifier
 final RequestNotifier requestNotifier = RequestNotifier();
 
-// NEW: Create a global key for the Navigator
+// Create a global key for the Navigator
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+// Create a global ValueNotifier for the user role.
+final ValueNotifier<String?> userRole = ValueNotifier<String?>(null);
 
 
 Future<void> main() async {
@@ -81,7 +84,6 @@ class MyApp extends StatefulWidget {
 }
 
 class _MyAppState extends State<MyApp> {
-  final ValueNotifier<String?> _userRole = ValueNotifier<String?>(null);
   StreamSubscription? _requestStreamSubscription;
   StreamSubscription<AuthState>? _authSubscription;
 
@@ -89,13 +91,16 @@ class _MyAppState extends State<MyApp> {
   @override
   void initState() {
     super.initState();
-    // REFACTORED: Use a single, reliable listener for all auth changes.
+    // Use a single, reliable listener for all auth changes.
     _authSubscription = supabase.auth.onAuthStateChange.listen((data) {
       final Session? session = data.session;
       if (session == null) {
-        _userRole.value = null;
+        // On logout, clear the role and stop listeners.
+        userRole.value = null;
         _stopListeningForRequests();
-        // Use the global navigatorKey to navigate reliably without a context.
+        
+        // This navigation now acts as a robust fallback for non-UI triggered sign-outs,
+        // like session expiry. The primary logout navigation is handled in the UI.
         navigatorKey.currentState?.pushNamedAndRemoveUntil('/login', (route) => false);
       } else {
         // When a user signs in or the initial session is loaded, fetch their role.
@@ -106,7 +111,7 @@ class _MyAppState extends State<MyApp> {
   
   @override
   void dispose() {
-    _userRole.dispose();
+    // Dispose subscriptions to prevent memory leaks
     _authSubscription?.cancel();
     _requestStreamSubscription?.cancel();
     super.dispose();
@@ -114,7 +119,7 @@ class _MyAppState extends State<MyApp> {
 
   Future<void> _fetchUserRole(String? userId) async {
     if (userId == null) {
-      _userRole.value = null;
+      userRole.value = null;
       _stopListeningForRequests();
       return;
     }
@@ -127,7 +132,7 @@ class _MyAppState extends State<MyApp> {
 
       if (response['role'] != null) {
         final role = response['role'] as String;
-        _userRole.value = role;
+        userRole.value = role; // Update the global notifier
         
         if (role == 'mechanic') {
           _listenForNewServiceRequests();
@@ -136,7 +141,7 @@ class _MyAppState extends State<MyApp> {
         }
 
       } else {
-        _userRole.value = null;
+        userRole.value = null;
         _stopListeningForRequests();
         snackbarKey.currentState?.showSnackBar(
           const SnackBar(
@@ -146,8 +151,9 @@ class _MyAppState extends State<MyApp> {
         );
       }
     } catch (e) {
-      _userRole.value = null;
+      userRole.value = null;
       _stopListeningForRequests();
+      // Check if the widget is still in the tree before showing a snackbar.
       if(mounted){
         snackbarKey.currentState?.showSnackBar(
           SnackBar(
@@ -160,6 +166,7 @@ class _MyAppState extends State<MyApp> {
   }
 
   void _listenForNewServiceRequests() {
+    // Ensure we don't create duplicate listeners
     _requestStreamSubscription?.cancel();
     
     _requestStreamSubscription = supabase
@@ -193,7 +200,7 @@ class _MyAppState extends State<MyApp> {
         primarySwatch: Colors.blue,
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
-      initialRoute: '/splash',
+      initialRoute: '/splash', // This is the correct way to set the starting route.
       routes: {
         '/splash': (context) => const SplashScreen(),
         '/login': (context) => const LoginScreen(),
@@ -207,9 +214,9 @@ class _MyAppState extends State<MyApp> {
         '/chat_list': (context) => const ChatListScreen(),
         '/account': (context) => const AccountScreen(),
         '/mechanic_dashboard': (context) => const MechanicServiceRequestsScreen(),
-        '/service_history': (context) => const ServiceHistoryScreen(), // <-- NEW ROUTE ADDED
+        '/service_history': (context) => const ServiceHistoryScreen(),
       },
-      home: const SplashScreen(), // Let SplashScreen handle initial auth check and redirect
+      // When 'initialRoute' is set, 'home' must be null.
     );
   }
 }
@@ -222,10 +229,9 @@ class NavigationDrawer extends StatelessWidget {
     final user = supabase.auth.currentUser;
     final bool isLoggedIn = user != null;
 
-    final myAppState = context.findAncestorStateOfType<_MyAppState>();
-
+    // Listen directly to the global `userRole` notifier.
     return ValueListenableBuilder<String?>(
-      valueListenable: myAppState?._userRole ?? ValueNotifier<String?>(null),
+      valueListenable: userRole,
       builder: (context, currentRole, child) {
         return Drawer(
           child: ListView(
@@ -278,6 +284,7 @@ class NavigationDrawer extends StatelessWidget {
                   } else if (currentRole == 'mechanic') {
                     Navigator.pushReplacementNamed(context, '/mechanic_dashboard');
                   } else {
+                    // Fallback to splash screen if role is unknown or not logged in
                     Navigator.pushReplacementNamed(context, '/splash');
                   }
                 },
@@ -292,7 +299,7 @@ class NavigationDrawer extends StatelessWidget {
               ),
               // Conditional items based on role
               if (currentRole == 'driver') ...[
-                 ListTile(
+                ListTile(
                   leading: const Icon(Icons.map, color: Colors.blue),
                   title: const Text('Find Mechanics'),
                   onTap: () {
@@ -300,7 +307,7 @@ class NavigationDrawer extends StatelessWidget {
                     Navigator.pushReplacementNamed(context, '/vehicle_owner_map');
                   },
                 ),
-                 ListTile( // <-- NEW NAVIGATION ITEM ADDED
+                ListTile( 
                   leading: const Icon(Icons.history, color: Colors.blue),
                   title: const Text('Service History'),
                   onTap: () {
@@ -309,7 +316,7 @@ class NavigationDrawer extends StatelessWidget {
                   },
                 ),
               ],
-               if (currentRole == 'mechanic')
+                if (currentRole == 'mechanic')
                 ValueListenableBuilder<bool>(
                   valueListenable: requestNotifier,
                   builder: (context, hasNewRequest, child) {
@@ -402,8 +409,17 @@ class NavigationDrawer extends StatelessWidget {
                   leading: const Icon(Icons.logout, color: Colors.red),
                   title: const Text('Logout'),
                   onTap: () async {
-                    Navigator.pop(context);
+                    Navigator.pop(context); // Close the drawer
+                    
+                    // **FIX**: Navigate away BEFORE signing out to prevent build errors.
+                    // This removes the NavigationDrawer from the widget tree before the
+                    // auth state changes, avoiding the race condition.
+                    Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+
                     await supabase.auth.signOut();
+                    
+                    // The onAuthStateChange listener handles clearing the userRole.
+                    // We can still show a snackbar for good UX.
                     snackbarKey.currentState?.showSnackBar(
                       const SnackBar(
                         content: Text('Logged out successfully.'),

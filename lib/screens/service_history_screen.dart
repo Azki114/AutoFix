@@ -1,4 +1,6 @@
+import 'package:autofix/screens/payment_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:autofix/main.dart'; // For supabase instance and snackbarKey
 
 class ServiceHistoryScreen extends StatefulWidget {
@@ -9,31 +11,68 @@ class ServiceHistoryScreen extends StatefulWidget {
 }
 
 class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
-  late Future<List<Map<String, dynamic>>> _requestsFuture;
+  late final Stream<List<Map<String, dynamic>>> _requestsStream;
   final String? _currentUserId = supabase.auth.currentUser?.id;
 
   @override
   void initState() {
     super.initState();
     if (_currentUserId != null) {
-      _requestsFuture = _fetchServiceHistory();
+      _requestsStream = supabase
+          .from('service_requests')
+          .stream(primaryKey: ['id'])
+          .eq('requester_id', _currentUserId!)
+          .order('created_at', ascending: false)
+          .map((maps) => maps
+              .map((map) => map as Map<String, dynamic>)
+              .toList());
     }
+  }
+  
+  // This function is now responsible for fetching the extra 'mechanic' and 'reviews' data
+  // for a list of requests that come from the stream.
+  Future<List<Map<String, dynamic>>> _fetchDetailsForRequests(
+      List<Map<String, dynamic>> requests) async {
+    if (requests.isEmpty) return [];
+
+    // Extract unique mechanic and request IDs to fetch related data in batches
+    final requestIds = requests.map((req) => req['id'] as String).toSet().toList();
+    final mechanicIds = requests
+        .map((req) => req['mechanic_id'] as String?)
+        .where((id) => id != null)
+        .toSet()
+        .toList();
+
+    if (requestIds.isEmpty) return requests;
+    
+    // Fetch profiles for all mechanics in one go
+    final profilesData = mechanicIds.isEmpty
+        ? <Map<String, dynamic>>[]
+        : await supabase
+            .from('profiles')
+            .select('id, full_name')
+            .inFilter('id', mechanicIds);
+    final profilesMap = {for (var p in profilesData) p['id']: p};
+
+    // Fetch reviews for all requests in one go
+    final reviewsData = await supabase
+        .from('reviews')
+        .select('service_request_id')
+        .inFilter('service_request_id', requestIds);
+    final reviewsMap = {
+      for (var r in reviewsData) r['service_request_id']: true
+    };
+    
+    // Combine the original request data with the fetched details
+    return requests.map((req) {
+      return {
+        ...req,
+        'mechanic': profilesMap[req['mechanic_id']],
+        'has_review': reviewsMap.containsKey(req['id'])
+      };
+    }).toList();
   }
 
-  Future<List<Map<String, dynamic>>> _fetchServiceHistory() async {
-    try {
-      // CORRECTED QUERY: Uses the proper foreign key relationship for reviews.
-      final response = await supabase
-          .from('service_requests')
-          .select('*, mechanic:profiles!mechanic_id(full_name), reviews!service_request_id(*)')
-          .eq('requester_id', _currentUserId!)
-          .order('created_at', ascending: false);
-      return response;
-    } catch (e) {
-      debugPrint("Error fetching service history: $e");
-      return [];
-    }
-  }
 
   Future<void> _submitReview({
     required int rating,
@@ -41,7 +80,7 @@ class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
     required String serviceRequestId,
     required String mechanicId,
   }) async {
-     if (_currentUserId == null) return;
+    if (_currentUserId == null) return;
     try {
       await supabase.from('reviews').insert({
         'service_request_id': serviceRequestId,
@@ -56,10 +95,7 @@ class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
           content: Text('Thank you for your feedback!'),
           backgroundColor: Colors.green,
         ));
-        // Refresh the list to show "Review Submitted"
-        setState(() {
-          _requestsFuture = _fetchServiceHistory();
-        });
+        // No need to call setState, StreamBuilder will update automatically
       }
     } catch (e) {
       if (mounted) {
@@ -84,7 +120,9 @@ class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
             return Padding(
               padding: EdgeInsets.only(
                 bottom: MediaQuery.of(context).viewInsets.bottom,
-                left: 16, right: 16, top: 16,
+                left: 16,
+                right: 16,
+                top: 16,
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -95,7 +133,8 @@ class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
                   const SizedBox(height: 16),
-                  Text('Your rating:', style: Theme.of(context).textTheme.titleMedium),
+                  Text('Your rating:',
+                      style: Theme.of(context).textTheme.titleMedium),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: List.generate(5, (index) {
@@ -126,15 +165,17 @@ class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: _rating > 0 ? () {
-                        Navigator.of(context).pop(); // Close the modal
-                        _submitReview(
-                          rating: _rating,
-                          comment: _commentController.text,
-                          serviceRequestId: request['id'],
-                          mechanicId: request['mechanic_id'],
-                        );
-                      } : null,
+                      onPressed: _rating > 0
+                          ? () {
+                              Navigator.of(context).pop(); // Close the modal
+                              _submitReview(
+                                rating: _rating,
+                                comment: _commentController.text,
+                                serviceRequestId: request['id'],
+                                mechanicId: request['mechanic_id'],
+                              );
+                            }
+                          : null,
                       child: const Text('Submit Review'),
                     ),
                   ),
@@ -155,8 +196,8 @@ class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
     }
     return Scaffold(
       appBar: AppBar(title: const Text('My Service History')),
-      body: FutureBuilder<List<Map<String, dynamic>>>(
-        future: _requestsFuture,
+      body: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: _requestsStream,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -166,47 +207,106 @@ class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
           }
           final requests = snapshot.data ?? [];
           if (requests.isEmpty) {
-            return const Center(child: Text('You have no service history yet.'));
+            return const Center(
+                child: Text('You have no service history yet.'));
           }
 
-          return ListView.builder(
-            itemCount: requests.length,
-            itemBuilder: (context, index) {
-              final request = requests[index];
-              final status = request['status'];
-              // CORRECTED: Key for mechanic's profile data
-              final mechanicName = request['mechanic']?['full_name'] ?? 'N/A';
-              // CORRECTED: Key for the joined reviews data
-              final bool hasReview = (request['reviews'] as List?)?.isNotEmpty ?? false;
+          return FutureBuilder<List<Map<String, dynamic>>>(
+            future: _fetchDetailsForRequests(requests),
+            builder: (context, detailsSnapshot) {
+              if (!detailsSnapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              
+              final detailedRequests = detailsSnapshot.data!;
 
-              return Card(
-                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Mechanic: $mechanicName', style: Theme.of(context).textTheme.titleLarge),
-                      const SizedBox(height: 8),
-                      Text('Status: $status', style: TextStyle(color: status == 'completed' ? Colors.green : Colors.orange, fontWeight: FontWeight.bold)),
-                      if (request['requester_notes'] != null) Text('Notes: ${request['requester_notes']}'),
-                      const SizedBox(height: 16),
-                      if (status == 'completed' && !hasReview)
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: ElevatedButton(
-                            onPressed: () => _showReviewDialog(request),
-                            child: const Text('Leave a Review'),
-                          ),
-                        )
-                      else if (status == 'completed' && hasReview)
-                         const Align(
-                          alignment: Alignment.centerRight,
-                          child: Text('Review Submitted ✔', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold)),
-                        )
-                    ],
-                  ),
-                ),
+              return ListView.builder(
+                itemCount: detailedRequests.length,
+                itemBuilder: (context, index) {
+                  final request = detailedRequests[index];
+                  final status = request['status'];
+                  final paymentStatus = request['payment_status'] ?? 'unpaid';
+                  final mechanicName = request['mechanic']?['full_name'] ?? 'N/A';
+                  final bool hasReview = request['has_review'] ?? false;
+                  final finalPrice = request['final_price'] ?? 0.0;
+                  
+                  return Card(
+                    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Mechanic: $mechanicName',
+                              style: Theme.of(context).textTheme.titleLarge),
+                          const SizedBox(height: 8),
+                          Text('Status: $status',
+                              style: TextStyle(
+                                  color: status == 'completed'
+                                      ? Colors.green
+                                      : Colors.orange,
+                                  fontWeight: FontWeight.bold)),
+                          if(finalPrice > 0) 
+                            Text('Amount: ₱${(finalPrice as num).toStringAsFixed(2)}', 
+                              style: Theme.of(context).textTheme.titleMedium),
+                          if (request['requester_notes'] != null)
+                            Text('Notes: ${request['requester_notes']}'),
+                          const SizedBox(height: 16),
+                          
+                          // --- ACTION BUTTONS LOGIC ---
+                          if (status == 'awaiting_payment')
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: ElevatedButton(
+                                onPressed: () async {
+                                  final result =
+                                      await Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (context) => PaymentScreen(
+                                        serviceRequestId: request['id'],
+                                        amount: (finalPrice as num).toDouble(),
+                                      ),
+                                    ),
+                                  );
+                                  // The stream will handle the UI update automatically
+                                  // if payment is successful.
+                                },
+                                style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.green),
+                                child: const Text('Pay Now'),
+                              ),
+                            )
+                          else if (status == 'completed' &&
+                              paymentStatus == 'paid' &&
+                              !hasReview)
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: ElevatedButton(
+                                onPressed: () => _showReviewDialog(request),
+                                child: const Text('Leave a Review'),
+                              ),
+                            )
+                          else if (status == 'completed' && hasReview)
+                             const Align(
+                              alignment: Alignment.centerRight,
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text('Paid & Reviewed',
+                                      style: TextStyle(
+                                          color: Colors.green,
+                                          fontWeight: FontWeight.bold)),
+                                  SizedBox(width: 4),
+                                  Icon(Icons.check_circle,
+                                      color: Colors.green, size: 16),
+                                ],
+                              ),
+                            )
+                        ],
+                      ),
+                    ),
+                  );
+                },
               );
             },
           );
@@ -215,4 +315,3 @@ class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
     );
   }
 }
-

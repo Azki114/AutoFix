@@ -17,7 +17,7 @@ dependencies:
   flutter_osm_plugin: ^1.4.1
   nominatim_flutter: ^0.0.8
   latlong2: ^0.9.1
-  supabase_flutter: ^2.9.1
+  supabase_flutter: ^2.10.1
   geocoding: ^4.0.0
   geolocator: ^14.0.1
   flutter_map: ^8.1.1
