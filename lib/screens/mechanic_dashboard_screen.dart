@@ -1,37 +1,42 @@
 // lib/screens/mechanic_dashboard_screen.dart
+
+import 'package:autofix/screens/mechanic_reviews_screen.dart'; // Import the new reviews screen
 import 'package:flutter/material.dart';
-import 'package:autofix/main.dart' as app_nav; // For NavigationDrawer
+import 'package:autofix/main.dart' as app_nav;
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:autofix/main.dart'; // To access the global 'supabase' client and 'snackbarKey'
-import 'package:autofix/screens/select_location_on_map_screen.dart'; // For editing shop location
-import 'package:latlong2/latlong.dart'; // For LatLng
-import 'package:geocoding/geocoding.dart'; // For reverse geocoding
-import 'package:autofix/screens/chat_list_screen.dart'; // NEW: Import ChatListScreen
+import 'package:autofix/main.dart';
+import 'package:autofix/screens/select_location_on_map_screen.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:autofix/screens/chat_list_screen.dart';
+import 'package:autofix/screens/mechanic_service_requests_screen.dart';
 
 class MechanicDashboardScreen extends StatefulWidget {
   const MechanicDashboardScreen({super.key});
 
   @override
-  State<MechanicDashboardScreen> createState() => _MechanicDashboardScreenState();
+  State<MechanicDashboardScreen> createState() =>
+      _MechanicDashboardScreenState();
 }
 
 class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
   Map<String, dynamic>? _mechanicShopData;
   bool _isLoading = true;
   String? _errorMessage;
+  bool _isAvailable = false;
 
-  // Controllers for editing shop details
+  // Controllers for editing shop details (removed pricing and radius)
   final TextEditingController _shopNameController = TextEditingController();
-  final TextEditingController _businessAddressController = TextEditingController();
-  final TextEditingController _serviceRadiusController = TextEditingController();
-  final TextEditingController _baseRateController = TextEditingController();
-  final TextEditingController _minimumChargeController = TextEditingController();
-  final TextEditingController _yearsExperienceController = TextEditingController();
-  final TextEditingController _certificationsController = TextEditingController();
+  final TextEditingController _businessAddressController =
+      TextEditingController();
+  final TextEditingController _yearsExperienceController =
+      TextEditingController();
+  final TextEditingController _certificationsController =
+      TextEditingController();
   final TextEditingController _specialtiesController = TextEditingController();
 
-  LatLng? _currentShopLocation; // Store the LatLng for map interaction
-  String? _mechanicName; // To display welcome message
+  LatLng? _currentShopLocation;
+  String? _mechanicName;
 
   @override
   void initState() {
@@ -43,9 +48,6 @@ class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
   void dispose() {
     _shopNameController.dispose();
     _businessAddressController.dispose();
-    _serviceRadiusController.dispose();
-    _baseRateController.dispose();
-    _minimumChargeController.dispose();
     _yearsExperienceController.dispose();
     _certificationsController.dispose();
     _specialtiesController.dispose();
@@ -60,18 +62,14 @@ class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
 
     final user = supabase.auth.currentUser;
     if (user == null) {
-      snackbarKey.currentState?.showSnackBar(
-        const SnackBar(content: Text('No authenticated user found.')),
-      );
       if (mounted) Navigator.pushReplacementNamed(context, '/login');
       return;
     }
 
     try {
-      // Fetch mechanic details for the current user
       final response = await supabase
           .from('mechanics')
-          .select('*, profiles!inner(full_name)') // Also fetch full_name from profiles
+          .select('*, profiles!inner(full_name)')
           .eq('user_id', user.id)
           .single();
 
@@ -79,104 +77,91 @@ class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
         setState(() {
           _mechanicShopData = response;
           _isLoading = false;
+          _isAvailable = _mechanicShopData!['is_available'] ?? false;
 
-          // Populate controllers with fetched data for editing
           _shopNameController.text = _mechanicShopData!['shop_name'] ?? '';
-          _businessAddressController.text = _mechanicShopData!['business_address'] ?? '';
-          _serviceRadiusController.text = (_mechanicShopData!['service_radius_km'] ?? '').toString();
-          _baseRateController.text = (_mechanicShopData!['base_rate_php'] ?? '').toString();
-          _minimumChargeController.text = (_mechanicShopData!['minimum_charge_php'] ?? '').toString();
-          _yearsExperienceController.text = (_mechanicShopData!['years_experience'] ?? '').toString();
-          _certificationsController.text = _mechanicShopData!['certifications'] ?? ''; // Stored as text
-          _specialtiesController.text = _mechanicShopData!['specialties'] ?? ''; // Stored as text
+          _businessAddressController.text =
+              _mechanicShopData!['business_address'] ?? '';
+          _yearsExperienceController.text =
+              (_mechanicShopData!['years_experience'] ?? '').toString();
+          _certificationsController.text =
+              _mechanicShopData!['certifications'] ?? '';
+          _specialtiesController.text = _mechanicShopData!['specialties'] ?? '';
 
-          // Set current shop location for map interaction
           final double? lat = _mechanicShopData!['latitude'];
           final double? lng = _mechanicShopData!['longitude'];
           if (lat != null && lng != null) {
             _currentShopLocation = LatLng(lat, lng);
           }
           
-          // Set mechanic name from joined profile data
-          _mechanicName = (_mechanicShopData!['profiles'] as Map<String, dynamic>?)?['full_name'] ?? 'Mechanic';
+          _mechanicName = (_mechanicShopData!['profiles']
+              as Map<String, dynamic>?)?['full_name'] ?? 'Mechanic';
         });
       }
-    } on PostgrestException catch (e) {
-      _errorMessage = 'Error loading shop data: ${e.message}';
-      snackbarKey.currentState?.showSnackBar(
-        SnackBar(content: Text(_errorMessage!), backgroundColor: Colors.red),
-      );
-      setState(() {
-        _isLoading = false;
-      });
     } catch (e) {
-      _errorMessage = 'An unexpected error occurred: ${e.toString()}';
-      snackbarKey.currentState?.showSnackBar(
-        SnackBar(content: Text(_errorMessage!), backgroundColor: Colors.red),
-      );
-      setState(() {
-        _isLoading = false;
-      });
+      _errorMessage = 'An error occurred loading your data.';
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
   Future<void> _updateMechanicShopData() async {
-    setState(() {
-      _isLoading = true; // Use _isLoading for update too
-    });
-
+    setState(() => _isLoading = true);
     final user = supabase.auth.currentUser;
     if (user == null) {
-      snackbarKey.currentState?.showSnackBar(
-        const SnackBar(content: Text('User not authenticated.')),
-      );
-      setState(() { _isLoading = false; });
+      _showSnackBar('User not authenticated.', Colors.red);
+      setState(() => _isLoading = false);
       return;
     }
-
     try {
+      // Removed pricing and radius from the update payload
       final updates = {
         'shop_name': _shopNameController.text.trim(),
         'business_address': _businessAddressController.text.trim(),
-        'service_radius_km': double.tryParse(_serviceRadiusController.text.trim()),
-        'base_rate_php': double.tryParse(_baseRateController.text.trim()),
-        'minimum_charge_php': double.tryParse(_minimumChargeController.text.trim()),
-        'years_experience': int.tryParse(_yearsExperienceController.text.trim()),
+        'years_experience':
+            int.tryParse(_yearsExperienceController.text.trim()),
         'certifications': _certificationsController.text.trim(),
         'specialties': _specialtiesController.text.trim(),
         'latitude': _currentShopLocation?.latitude,
         'longitude': _currentShopLocation?.longitude,
       };
+      await supabase.from('mechanics').update(updates).eq('user_id', user.id);
+      _showSnackBar('Shop data updated successfully!', Colors.green);
+      _fetchMechanicShopData();
+    } catch (e) {
+      _showSnackBar('Error updating shop data: ${e.toString()}', Colors.red);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
+  Future<void> _toggleAvailability(bool value) async {
+    setState(() => _isAvailable = value);
+    final user = supabase.auth.currentUser;
+    try {
       await supabase
           .from('mechanics')
-          .update(updates)
-          .eq('user_id', user.id);
-
-      _showSnackBar('Shop data updated successfully!', Colors.green);
-      _fetchMechanicShopData(); // Refresh data after update
-    } on PostgrestException catch (e) {
-      _showSnackBar('Error updating shop data: ${e.message}', Colors.red);
+          .update({'is_available': value})
+          .eq('user_id', user!.id);
+      _showSnackBar(
+          'You are now ${value ? "Online" : "Offline"}',
+          value ? Colors.green : Colors.orange,
+      );
     } catch (e) {
-      _showSnackBar('An unexpected error occurred during update: ${e.toString()}', Colors.red);
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
+      _showSnackBar('Failed to update availability.', Colors.red);
+      if(mounted) setState(() => _isAvailable = !value);
     }
   }
 
   void _showSnackBar(String message, Color backgroundColor) {
     snackbarKey.currentState?.showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: backgroundColor,
-      ),
+      SnackBar(content: Text(message), backgroundColor: backgroundColor),
     );
   }
 
-  // Helper method to build common TextField widgets
-  Widget _buildTextField(TextEditingController controller, String label, String hint, {TextInputType keyboardType = TextInputType.text, bool enabled = true}) {
+  Widget _buildTextField(TextEditingController controller, String label, String hint,
+      {TextInputType keyboardType = TextInputType.text, bool enabled = true}) {
     return TextFormField(
       controller: controller,
       keyboardType: keyboardType,
@@ -185,13 +170,14 @@ class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
         labelText: label,
         hintText: hint,
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       ),
     );
   }
 
-  // Helper method to build a dashboard card
-  Widget _buildDashboardCard(BuildContext context, {
+  Widget _buildDashboardCard(
+    BuildContext context, {
     required String title,
     required IconData icon,
     required VoidCallback onTap,
@@ -225,218 +211,235 @@ class _MechanicDashboardScreenState extends State<MechanicDashboardScreen> {
     );
   }
 
+  Widget _buildHomeTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Welcome, ${_mechanicName ?? 'Mechanic'}!',
+            style: const TextStyle(
+                fontSize: 24, fontWeight: FontWeight.bold, color: Colors.blue),
+          ),
+          const SizedBox(height: 20),
+          SwitchListTile.adaptive(
+            title: Text(
+              _isAvailable ? 'You are Online' : 'You are Offline',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            subtitle: Text(_isAvailable
+                ? 'You can now receive service requests.'
+                : 'Go online to receive requests.'),
+            value: _isAvailable,
+            onChanged: _toggleAvailability,
+            activeColor: Colors.green,
+            tileColor: Colors.blue.withOpacity(0.05),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            secondary: Icon(
+              _isAvailable ? Icons.check_circle : Icons.cancel,
+              color: _isAvailable ? Colors.green : Colors.grey,
+            ),
+          ),
+          const SizedBox(height: 32),
+          GridView.count(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisCount: 2,
+            crossAxisSpacing: 16.0,
+            mainAxisSpacing: 16.0,
+            children: [
+              _buildDashboardCard(
+                context,
+                title: 'Service Requests',
+                icon: Icons.handyman,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const MechanicServiceRequestsScreen(),
+                    ),
+                  );
+                },
+              ),
+              _buildDashboardCard(
+                context,
+                title: 'My Chats',
+                icon: Icons.chat,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ChatListScreen(),
+                    ),
+                  );
+                },
+              ),
+              _buildDashboardCard(
+                context,
+                title: 'My Reviews', // CHANGED FROM "Service History"
+                icon: Icons.star_rate, // CHANGED ICON
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const MechanicReviewsScreen(), // NAVIGATES TO NEW SCREEN
+                    ),
+                  );
+                },
+              ),
+              _buildDashboardCard(
+                context,
+                title: 'My Account', // CHANGED FROM "My Earnings"
+                icon: Icons.person, // CHANGED ICON
+                onTap: () {
+                  // This will switch to the second tab ("My Shop Profile")
+                  DefaultTabController.of(context).animateTo(1);
+                },
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildProfileTab() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text(
+            'Edit Shop Information',
+            style: TextStyle(
+                fontSize: 22, fontWeight: FontWeight.bold, color: Colors.blue),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 24),
+          _buildTextField(_shopNameController, 'Shop Name', 'Your Shop Name'),
+          const SizedBox(height: 16),
+          _buildTextField(_yearsExperienceController, 'Years of Experience', 'e.g., 5',
+              keyboardType: TextInputType.number),
+          const SizedBox(height: 16),
+          _buildTextField(_certificationsController,
+              'Certifications (comma-separated)', 'e.g., ASE, NCIII'),
+          const SizedBox(height: 16),
+          _buildTextField(_specialtiesController,
+              'Specialties (comma-separated)', 'e.g., Engine, Brakes'),
+          const SizedBox(height: 24),
+          const Text(
+            'Location Details',
+            style: TextStyle(
+                fontSize: 22, fontWeight: FontWeight.bold, color: Colors.blue),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 24),
+          _buildTextField(_businessAddressController, 'Business Address',
+              'Select on map below',
+              enabled: false),
+          const SizedBox(height: 8),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.map, color: Colors.white),
+            label: const Text('Edit Shop Location on Map',
+                style: TextStyle(color: Colors.white)),
+            onPressed: () async {
+              final LatLng? selectedLatLng = await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => SelectLocationOnMapScreen(
+                    initialLocation: _currentShopLocation,
+                  ),
+                ),
+              );
+
+              if (selectedLatLng != null) {
+                setState(() => _currentShopLocation = selectedLatLng);
+                try {
+                  List<Placemark> placemarks = await placemarkFromCoordinates(
+                    selectedLatLng.latitude,
+                    selectedLatLng.longitude,
+                  );
+                  if (placemarks.isNotEmpty) {
+                    final Placemark p = placemarks.first;
+                    _businessAddressController.text = [
+                      p.street, p.subLocality, p.locality, p.administrativeArea, p.country
+                    ].where((e) => e != null && e.isNotEmpty).join(', ');
+                  }
+                } catch (e) {
+                   _showSnackBar('Error fetching address.', Colors.red);
+                }
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+          const SizedBox(height: 32),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.save, color: Colors.white),
+            label: const Text('Save Changes',
+                style: TextStyle(fontSize: 18, color: Colors.white)),
+            onPressed: _isLoading ? null : _updateMechanicShopData,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Mechanic Dashboard',
-            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
-        backgroundColor: const Color.fromARGB(233, 214, 251, 250),
-        centerTitle: true,
-        elevation: 1,
-      ),
-      drawer: const app_nav.NavigationDrawer(), // Attach the NavigationDrawer
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _errorMessage != null
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(_errorMessage!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.red)),
-                      const SizedBox(height: 20),
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.refresh, color: Colors.white),
-                        label: const Text('Retry Load Data', style: TextStyle(color: Colors.white)),
-                        onPressed: _fetchMechanicShopData,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              : SingleChildScrollView(
-                  padding: const EdgeInsets.all(24.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Text(
-                        'Welcome, ${_mechanicName ?? 'Mechanic'}!',
-                        style: const TextStyle(
-                            fontSize: 24, fontWeight: FontWeight.bold, color: Colors.blue),
-                      ),
-                      const SizedBox(height: 20),
-                      // Dashboard Grid for main actions
-                      GridView.count(
-                        shrinkWrap: true, // Make GridView take only necessary space
-                        physics: const NeverScrollableScrollPhysics(), // Disable GridView's own scrolling
-                        crossAxisCount: 2, // 2 columns
-                        crossAxisSpacing: 16.0,
-                        mainAxisSpacing: 16.0,
+    return DefaultTabController(
+      length: 2,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Mechanic Home',
+              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.blue)),
+          backgroundColor: const Color.fromARGB(233, 214, 251, 250),
+          centerTitle: true,
+          elevation: 1,
+          bottom: const TabBar(
+            tabs: [
+              Tab(icon: Icon(Icons.home), text: 'Home'),
+              Tab(icon: Icon(Icons.store), text: 'My Shop Profile'),
+            ],
+          ),
+        ),
+        drawer: const app_nav.NavigationDrawer(),
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : _errorMessage != null
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          // Card for "My Chats"
-                          _buildDashboardCard(
-                            context,
-                            title: 'My Chats',
-                            icon: Icons.chat,
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => const ChatListScreen(),
-                                ),
-                              );
-                            },
-                          ),
-                          // Placeholder for other Mechanic functions
-                          _buildDashboardCard(
-                            context,
-                            title: 'Service Requests',
-                            icon: Icons.handyman,
-                            onTap: () {
-                              snackbarKey.currentState?.showSnackBar(
-                                const SnackBar(content: Text('Service Requests coming soon!')),
-                              );
-                              // TODO: Navigate to Service Requests screen
-                            },
-                          ),
-                          _buildDashboardCard(
-                            context,
-                            title: 'My Profile',
-                            icon: Icons.person,
-                            onTap: () {
-                              snackbarKey.currentState?.showSnackBar(
-                                const SnackBar(content: Text('Profile edit fields are below!')),
-                              );
-                              // Can also navigate to a separate profile screen if desired
-                            },
-                          ),
-                          _buildDashboardCard(
-                            context,
-                            title: 'Settings',
-                            icon: Icons.settings,
-                            onTap: () {
-                              snackbarKey.currentState?.showSnackBar(
-                                const SnackBar(content: Text('Settings coming soon!')),
-                              );
-                            },
+                          Text(_errorMessage!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.red)),
+                          const SizedBox(height: 20),
+                          ElevatedButton.icon(
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('Retry'),
+                            onPressed: _fetchMechanicShopData,
                           ),
                         ],
                       ),
-                      const SizedBox(height: 32), // Separator
-
-                      // Shop Information Edit Section
-                      const Text(
-                        'Edit Shop Information',
-                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.blue),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 24),
-                      _buildTextField(_shopNameController, 'Shop Name', 'Your Shop Name'),
-                      const SizedBox(height: 16),
-                      _buildTextField(_yearsExperienceController, 'Years of Experience', 'e.g., 5', keyboardType: TextInputType.number),
-                      const SizedBox(height: 16),
-                      _buildTextField(_certificationsController, 'Certifications (comma-separated)', 'e.g., ASE, NCIII'),
-                      const SizedBox(height: 16),
-                      _buildTextField(_specialtiesController, 'Specialties (comma-separated)', 'e.g., Engine, Brakes'),
-                      const SizedBox(height: 24),
-
-                      const Text(
-                        'Location & Service Details',
-                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.blue),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 24),
-                      _buildTextField(_businessAddressController, 'Business Address', 'Select on map below', enabled: false),
-                      const SizedBox(height: 8),
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.map, color: Colors.white),
-                        label: const Text('Edit Shop Location on Map', style: TextStyle(color: Colors.white)),
-                        onPressed: () async {
-                          final LatLng? selectedLatLng = await Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => SelectLocationOnMapScreen(
-                                initialLocation: _currentShopLocation,
-                              ),
-                            ),
-                          );
-
-                          if (selectedLatLng != null) {
-                            setState(() {
-                              _currentShopLocation = selectedLatLng;
-                            });
-                            // Reverse geocode the selected coordinates to display address
-                            try {
-                              List<Placemark> placemarks = await placemarkFromCoordinates(
-                                selectedLatLng.latitude,
-                                selectedLatLng.longitude,
-                              );
-                              if (placemarks.isNotEmpty) {
-                                final Placemark place = placemarks.first;
-                                _businessAddressController.text = [
-                                  place.street,
-                                  place.subLocality,
-                                  place.locality,
-                                  place.administrativeArea,
-                                  place.country,
-                                ].where((element) => element != null && element.isNotEmpty).join(', ');
-                              } else {
-                                _businessAddressController.text = 'Address not found for selected coordinates.';
-                                snackbarKey.currentState?.showSnackBar(
-                                  const SnackBar(content: Text('Address not found for selected coordinates. Using raw coordinates.')),
-                                );
-                              }
-                            } catch (e) {
-                              _businessAddressController.text = 'Error fetching address.';
-                              snackbarKey.currentState?.showSnackBar(
-                                SnackBar(content: Text('Error fetching address: ${e.toString()}. Using raw coordinates.')),
-                              );
-                            }
-                          }
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          elevation: 3,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      _buildTextField(_serviceRadiusController, 'Service Radius (km)', 'e.g., 30', keyboardType: TextInputType.number),
-                      const SizedBox(height: 24),
-
-                      const Text(
-                        'Pricing Details',
-                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.blue),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 24),
-                      _buildTextField(_baseRateController, 'Base Rate (₱)', 'e.g., 50', keyboardType: TextInputType.number),
-                      const SizedBox(height: 16),
-                      _buildTextField(_minimumChargeController, 'Minimum Charge (₱)', 'e.g., 100', keyboardType: TextInputType.number),
-                      // You might want to add a dropdown for pricing unit here if you allow editing it
-                      const SizedBox(height: 32),
-                      ElevatedButton.icon(
-                        icon: const Icon(Icons.save, color: Colors.white),
-                        label: const Text('Save Changes', style: TextStyle(fontSize: 18, color: Colors.white)),
-                        onPressed: _isLoading ? null : _updateMechanicShopData,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          elevation: 3,
-                        ),
-                      ),
+                    ),
+                  )
+                : TabBarView(
+                    children: [
+                      _buildHomeTab(),
+                      _buildProfileTab(),
                     ],
                   ),
-                ),
+      ),
     );
   }
 }

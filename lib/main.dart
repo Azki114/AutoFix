@@ -13,7 +13,8 @@ import 'package:autofix/screens/register_screen.dart';
 import 'package:autofix/screens/profile_screen.dart'; // User Profile Screen
 import 'package:autofix/screens/splash_screen.dart'; // For initial loading/redirection
 import 'package:autofix/screens/vehicle_owner_map_screen.dart'; // Driver's map
-import 'package:autofix/screens/mechanic_service_requests_screen.dart'; // MECHANIC'S NEW DEDICATED SCREEN
+import 'package:autofix/screens/mechanic_dashboard_screen.dart'; // Import the new dashboard
+import 'package:autofix/screens/mechanic_service_requests_screen.dart';
 import 'package:autofix/screens/chat_list_screen.dart'; // Import the new ChatListScreen
 
 // --- Existing app screens ---
@@ -26,7 +27,6 @@ import 'package:autofix/screens/account_screen.dart'; // Account screen from pre
 // --- App Services ---
 import 'package:autofix/services/notification_service.dart';
 import 'package:autofix/services/request_notifier.dart';
-
 
 // Global Supabase client instance
 late final SupabaseClient supabase;
@@ -44,7 +44,6 @@ final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 // Create a global ValueNotifier for the user role.
 final ValueNotifier<String?> userRole = ValueNotifier<String?>(null);
 
-
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized(); // Required for async initialization
 
@@ -56,7 +55,10 @@ Future<void> main() async {
   final String? supabaseAnonKey = dotenv.env['SUPABASE_ANON_KEY'];
 
   // Check if the Supabase environment variables were successfully loaded.
-  if (supabaseUrl == null || supabaseUrl.isEmpty || supabaseAnonKey == null || supabaseAnonKey.isEmpty) {
+  if (supabaseUrl == null ||
+      supabaseUrl.isEmpty ||
+      supabaseAnonKey == null ||
+      supabaseAnonKey.isEmpty) {
     throw Exception('Supabase environment variables are missing.');
   }
 
@@ -65,13 +67,13 @@ Future<void> main() async {
     url: supabaseUrl,
     anonKey: supabaseAnonKey,
   );
-  supabase = Supabase.instance.client; // Get the client instance after initialization
+  supabase =
+      Supabase.instance.client; // Get the client instance after initialization
 
   // Initialize Firebase for push notifications
   await Firebase.initializeApp();
   // Initialize the notification service to handle FCM tokens and messages
   await NotificationService().initialize();
-
 
   runApp(const MyApp());
 }
@@ -87,7 +89,6 @@ class _MyAppState extends State<MyApp> {
   StreamSubscription? _requestStreamSubscription;
   StreamSubscription<AuthState>? _authSubscription;
 
-
   @override
   void initState() {
     super.initState();
@@ -98,17 +99,18 @@ class _MyAppState extends State<MyApp> {
         // On logout, clear the role and stop listeners.
         userRole.value = null;
         _stopListeningForRequests();
-        
+
         // This navigation now acts as a robust fallback for non-UI triggered sign-outs,
         // like session expiry. The primary logout navigation is handled in the UI.
-        navigatorKey.currentState?.pushNamedAndRemoveUntil('/login', (route) => false);
+        navigatorKey.currentState
+            ?.pushNamedAndRemoveUntil('/login', (route) => false);
       } else {
         // When a user signs in or the initial session is loaded, fetch their role.
         _fetchUserRole(session.user.id);
       }
     });
   }
-  
+
   @override
   void dispose() {
     // Dispose subscriptions to prevent memory leaks
@@ -133,19 +135,19 @@ class _MyAppState extends State<MyApp> {
       if (response['role'] != null) {
         final role = response['role'] as String;
         userRole.value = role; // Update the global notifier
-        
+
         if (role == 'mechanic') {
           _listenForNewServiceRequests();
         } else {
           _stopListeningForRequests();
         }
-
       } else {
         userRole.value = null;
         _stopListeningForRequests();
         snackbarKey.currentState?.showSnackBar(
           const SnackBar(
-            content: Text('Your profile\'s role could not be loaded. Please ensure your profile is complete.'),
+            content: Text(
+                'Your profile\'s role could not be loaded. Please ensure your profile is complete.'),
             backgroundColor: Colors.orange,
           ),
         );
@@ -154,7 +156,7 @@ class _MyAppState extends State<MyApp> {
       userRole.value = null;
       _stopListeningForRequests();
       // Check if the widget is still in the tree before showing a snackbar.
-      if(mounted){
+      if (mounted) {
         snackbarKey.currentState?.showSnackBar(
           SnackBar(
             content: Text('An error occurred loading user data: ${e.toString()}.'),
@@ -168,19 +170,19 @@ class _MyAppState extends State<MyApp> {
   void _listenForNewServiceRequests() {
     // Ensure we don't create duplicate listeners
     _requestStreamSubscription?.cancel();
-    
+
     _requestStreamSubscription = supabase
         .from('service_requests')
         .stream(primaryKey: ['id'])
         .eq('status', 'pending')
         .listen((data) {
-      if (data.isNotEmpty) {
-        debugPrint("New service request detected!");
-        requestNotifier.show();
-      }
-    }, onError: (error) {
-        debugPrint("Error listening to service requests: $error");
-    });
+          if (data.isNotEmpty) {
+            debugPrint("New service request detected!");
+            requestNotifier.show();
+          }
+        }, onError: (error) {
+          debugPrint("Error listening to service requests: $error");
+        });
   }
 
   void _stopListeningForRequests() {
@@ -214,7 +216,8 @@ class _MyAppState extends State<MyApp> {
         '/terms_conditions': (context) => const TermsConditionsScreen(),
         '/chat_list': (context) => const ChatListScreen(),
         '/account': (context) => const AccountScreen(),
-        '/mechanic_dashboard': (context) => const MechanicServiceRequestsScreen(),
+        '/mechanic_dashboard': (context) => const MechanicDashboardScreen(), // Corrected line from previous step
+        '/mechanic_service_requests': (context) => const MechanicServiceRequestsScreen(),
         '/service_history': (context) => const ServiceHistoryScreen(),
       },
       // When 'initialRoute' is set, 'home' must be null.
@@ -283,7 +286,8 @@ class NavigationDrawer extends StatelessWidget {
                   if (currentRole == 'driver') {
                     Navigator.pushReplacementNamed(context, '/vehicle_owner_map');
                   } else if (currentRole == 'mechanic') {
-                    Navigator.pushReplacementNamed(context, '/mechanic_dashboard');
+                    Navigator.pushReplacementNamed(
+                        context, '/mechanic_dashboard');
                   } else {
                     // Fallback to splash screen if role is unknown or not logged in
                     Navigator.pushReplacementNamed(context, '/splash');
@@ -305,10 +309,11 @@ class NavigationDrawer extends StatelessWidget {
                   title: const Text('Find Mechanics'),
                   onTap: () {
                     Navigator.pop(context);
-                    Navigator.pushReplacementNamed(context, '/vehicle_owner_map');
+                    Navigator.pushReplacementNamed(
+                        context, '/vehicle_owner_map');
                   },
                 ),
-                ListTile( 
+                ListTile(
                   leading: const Icon(Icons.history, color: Colors.blue),
                   title: const Text('Service History'),
                   onTap: () {
@@ -317,24 +322,31 @@ class NavigationDrawer extends StatelessWidget {
                   },
                 ),
               ],
-                if (currentRole == 'mechanic')
+              if (currentRole == 'mechanic')
                 ValueListenableBuilder<bool>(
                   valueListenable: requestNotifier,
                   builder: (context, hasNewRequest, child) {
                     return ListTile(
-                      leading: const Icon(Icons.dashboard, color: Colors.blue),
+                      leading:
+                          const Icon(Icons.dashboard, color: Colors.blue),
                       title: const Text('Service Requests'),
                       trailing: hasNewRequest
                           ? const CircleAvatar(
                               radius: 12,
                               backgroundColor: Colors.red,
-                              child: Text('!', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+                              child: Text('!',
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold)),
                             )
                           : null,
                       onTap: () {
                         requestNotifier.hide();
                         Navigator.pop(context);
-                        Navigator.pushReplacementNamed(context, '/mechanic_dashboard');
+                        // Navigate to the specific requests screen, not the whole dashboard
+                        Navigator.pushNamed(
+                            context, '/mechanic_service_requests');
                       },
                     );
                   },
@@ -368,7 +380,8 @@ class NavigationDrawer extends StatelessWidget {
                 title: const Text('Terms & Conditions'),
                 onTap: () {
                   Navigator.pop(context);
-                  Navigator.pushReplacementNamed(context, '/terms_conditions');
+                  Navigator.pushReplacementNamed(
+                      context, '/terms_conditions');
                 },
               ),
               const Divider(color: Colors.blueGrey),
@@ -399,8 +412,9 @@ class NavigationDrawer extends StatelessWidget {
                   },
                 ),
                 ListTile(
-                  leading: const Icon(Icons.account_circle, color: Colors.blue),
-                  title: const Text('Account Details'),
+                  leading:
+                      const Icon(Icons.account_circle, color: Colors.blue),
+                  title: const Text('Account Settings'),
                   onTap: () {
                     Navigator.pop(context);
                     Navigator.pushNamed(context, '/account');
@@ -411,16 +425,13 @@ class NavigationDrawer extends StatelessWidget {
                   title: const Text('Logout'),
                   onTap: () async {
                     Navigator.pop(context); // Close the drawer
-                    
-                    // **FIX**: Navigate away BEFORE signing out to prevent build errors.
-                    // This removes the NavigationDrawer from the widget tree before the
-                    // auth state changes, avoiding the race condition.
-                    Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
+
+                    // Navigate away BEFORE signing out to prevent build errors.
+                    Navigator.pushNamedAndRemoveUntil(
+                        context, '/login', (route) => false);
 
                     await supabase.auth.signOut();
-                    
-                    // The onAuthStateChange listener handles clearing the userRole.
-                    // We can still show a snackbar for good UX.
+
                     snackbarKey.currentState?.showSnackBar(
                       const SnackBar(
                         content: Text('Logged out successfully.'),
@@ -437,4 +448,3 @@ class NavigationDrawer extends StatelessWidget {
     );
   }
 }
-
