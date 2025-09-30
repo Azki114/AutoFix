@@ -29,7 +29,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final profileRes = await supabase
           .from('profiles')
           .select('full_name, role')
-          .eq('id', _currentUserId!)
+          .eq('id', _currentUserId)
           .single();
 
       final String role = profileRes['role'];
@@ -40,14 +40,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
         final driverRes = await supabase
             .from('drivers')
             .select('*')
-            .eq('user_id', _currentUserId!)
+            .eq('user_id', _currentUserId)
             .single();
         userProfileData['details'] = driverRes;
       } else if (role == 'mechanic') {
         final mechanicRes = await supabase
             .from('mechanics')
             .select('*')
-            .eq('user_id', _currentUserId!)
+            .eq('user_id', _currentUserId)
             .single();
         userProfileData['details'] = mechanicRes;
 
@@ -55,7 +55,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         final reviewsRes = await supabase
             .from('reviews')
             .select('*, owner:profiles!owner_id(full_name)')
-            .eq('mechanic_id', _currentUserId!)
+            .eq('mechanic_id', _currentUserId)
             .order('created_at', ascending: false);
         userProfileData['reviews'] = reviewsRes;
       }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:autofix/screens/payment_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -11,31 +12,64 @@ class ServiceHistoryScreen extends StatefulWidget {
 }
 
 class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
-  late final Stream<List<Map<String, dynamic>>> _requestsStream;
+  // Use a StreamController to allow for manual refreshes.
+  final StreamController<List<Map<String, dynamic>>> _streamController = StreamController<List<Map<String, dynamic>>>.broadcast();
   final String? _currentUserId = supabase.auth.currentUser?.id;
 
   @override
   void initState() {
     super.initState();
     if (_currentUserId != null) {
-      _requestsStream = supabase
-          .from('service_requests')
-          .stream(primaryKey: ['id'])
-          .eq('requester_id', _currentUserId!)
-          .order('created_at', ascending: false)
-          .map((maps) => maps
-              .map((map) => map as Map<String, dynamic>)
-              .toList());
+      _fetchAndPushData();
     }
   }
-  
+
+  @override
+  void dispose() {
+    _streamController.close();
+    super.dispose();
+  }
+
+  // Fetches initial data and listens for real-time changes.
+  void _fetchAndPushData() {
+    supabase
+        .from('service_requests')
+        .stream(primaryKey: ['id'])
+        .eq('requester_id', _currentUserId!)
+        .order('created_at', ascending: false)
+        .listen((data) {
+          if (!_streamController.isClosed) {
+            _streamController.add(data);
+          }
+        });
+  }
+
+  // This is the new function for the refresh button.
+  Future<void> _refreshData() async {
+    // Show a loading indicator
+    snackbarKey.currentState?.showSnackBar(const SnackBar(
+      content: Text('Refreshing history...'),
+      duration: Duration(seconds: 1),
+    ));
+
+    // Manually refetch the latest data and push it into the stream
+    final freshData = await supabase
+        .from('service_requests')
+        .select()
+        .eq('requester_id', _currentUserId!)
+        .order('created_at', ascending: false);
+    
+    if (!_streamController.isClosed) {
+      _streamController.add(freshData);
+    }
+  }
+
   // This function is now responsible for fetching the extra 'mechanic' and 'reviews' data
   // for a list of requests that come from the stream.
   Future<List<Map<String, dynamic>>> _fetchDetailsForRequests(
       List<Map<String, dynamic>> requests) async {
     if (requests.isEmpty) return [];
 
-    // Extract unique mechanic and request IDs to fetch related data in batches
     final requestIds = requests.map((req) => req['id'] as String).toSet().toList();
     final mechanicIds = requests
         .map((req) => req['mechanic_id'] as String?)
@@ -45,7 +79,6 @@ class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
 
     if (requestIds.isEmpty) return requests;
     
-    // Fetch profiles for all mechanics in one go
     final profilesData = mechanicIds.isEmpty
         ? <Map<String, dynamic>>[]
         : await supabase
@@ -54,7 +87,6 @@ class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
             .inFilter('id', mechanicIds);
     final profilesMap = {for (var p in profilesData) p['id']: p};
 
-    // Fetch reviews for all requests in one go
     final reviewsData = await supabase
         .from('reviews')
         .select('service_request_id')
@@ -63,7 +95,6 @@ class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
       for (var r in reviewsData) r['service_request_id']: true
     };
     
-    // Combine the original request data with the fetched details
     return requests.map((req) {
       return {
         ...req,
@@ -95,7 +126,6 @@ class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
           content: Text('Thank you for your feedback!'),
           backgroundColor: Colors.green,
         ));
-        // No need to call setState, StreamBuilder will update automatically
       }
     } catch (e) {
       if (mounted) {
@@ -167,7 +197,7 @@ class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
                     child: ElevatedButton(
                       onPressed: _rating > 0
                           ? () {
-                              Navigator.of(context).pop(); // Close the modal
+                              Navigator.of(context).pop(); 
                               _submitReview(
                                 rating: _rating,
                                 comment: _commentController.text,
@@ -195,11 +225,22 @@ class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
       return const Scaffold(body: Center(child: Text("User not logged in.")));
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('My Service History')),
+      appBar: AppBar(
+        title: const Text('My Service History'),
+        // --- THIS IS THE NEW PART ---
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _refreshData,
+            tooltip: 'Refresh',
+          ),
+        ],
+        // -------------------------
+      ),
       body: StreamBuilder<List<Map<String, dynamic>>>(
-        stream: _requestsStream,
+        stream: _streamController.stream,
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+          if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
           if (snapshot.hasError) {
@@ -215,6 +256,7 @@ class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
             future: _fetchDetailsForRequests(requests),
             builder: (context, detailsSnapshot) {
               if (!detailsSnapshot.hasData) {
+                // Show a shimmer or placeholder while details are loading
                 return const Center(child: CircularProgressIndicator());
               }
               
@@ -249,7 +291,8 @@ class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
                           if(finalPrice > 0) 
                             Text('Amount: ₱${(finalPrice as num).toStringAsFixed(2)}', 
                               style: Theme.of(context).textTheme.titleMedium),
-                          if (request['requester_notes'] != null)
+                          if (request['requester_notes'] != null &&
+                              request['requester_notes'].isNotEmpty)
                             Text('Notes: ${request['requester_notes']}'),
                           const SizedBox(height: 16),
                           
@@ -259,8 +302,7 @@ class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
                               alignment: Alignment.centerRight,
                               child: ElevatedButton(
                                 onPressed: () async {
-                                  final result =
-                                      await Navigator.of(context).push(
+                                  await Navigator.of(context).push(
                                     MaterialPageRoute(
                                       builder: (context) => PaymentScreen(
                                         serviceRequestId: request['id'],
@@ -268,8 +310,6 @@ class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
                                       ),
                                     ),
                                   );
-                                  // The stream will handle the UI update automatically
-                                  // if payment is successful.
                                 },
                                 style: ElevatedButton.styleFrom(
                                     backgroundColor: Colors.green),

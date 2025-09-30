@@ -142,7 +142,7 @@ class _SelectLocationOnMapScreenState extends State<SelectLocationOnMapScreen> {
               onPositionChanged: (pos, hasGesture) {
                 if (hasGesture && pos.center != null) {
                   setState(() {
-                    _selectedLocation = pos.center!;
+                    _selectedLocation = pos.center;
                   });
                   if (_debounce?.isActive ?? false) _debounce!.cancel();
                   _debounce = Timer(const Duration(milliseconds: 500), () {

@@ -200,8 +200,9 @@ class _MyAppState extends State<MyApp> {
         primarySwatch: Colors.blue,
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
-      initialRoute: '/splash', // This is the correct way to set the starting route.
+      initialRoute: '/', // This is the correct way to set the starting route.
       routes: {
+        '/': (context) => const SplashScreen(),
         '/splash': (context) => const SplashScreen(),
         '/login': (context) => const LoginScreen(),
         '/register': (context) => const RegisterScreen(),
@@ -391,7 +392,7 @@ class NavigationDrawer extends StatelessWidget {
               ] else ...[
                 ListTile(
                   leading: const Icon(Icons.person, color: Colors.blue),
-                  title: const Text('Profile Settings'),
+                  title: const Text('Profile'),
                   onTap: () {
                     Navigator.pop(context);
                     Navigator.pushNamed(context, '/profile');

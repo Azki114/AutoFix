@@ -31,10 +31,13 @@ class _PaymentScreenState extends State<PaymentScreen> {
         'status': 'successful', // Cash is successful immediately
       });
 
-      // 2. Update the service request as paid
+      // 2. Update the service request as paid AND completed
       await supabase
           .from('service_requests')
-          .update({'payment_status': 'paid'})
+          .update({
+            'payment_status': 'paid',
+            'status': 'completed' // <-- THIS IS THE FIX
+            })
           .eq('id', widget.serviceRequestId);
 
       if (mounted) {
@@ -72,6 +75,16 @@ class _PaymentScreenState extends State<PaymentScreen> {
         if (await canLaunchUrl(checkoutUrl)) {
           // Redirect user to the payment app (GCash/Maya)
           await launchUrl(checkoutUrl, mode: LaunchMode.externalApplication);
+          
+          // NOTE: The user is now outside your app.
+          // The database update for digital payments MUST be handled by your
+          // Supabase webhook function ('payment-webhook-handler/index.ts').
+          // You do NOT pop or return from this screen until the webhook confirms payment.
+          // For now, we will just pop the screen for simplicity.
+          if (mounted) {
+            Navigator.of(context).pop();
+          }
+
         } else {
           throw 'Could not launch payment URL';
         }
@@ -81,9 +94,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
     } catch (e) {
       if(mounted){
          snackbarKey.currentState?.showSnackBar(SnackBar(
-          content: Text('Payment Error: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ));
+        content: Text('Payment Error: ${e.toString()}'),
+        backgroundColor: Colors.red,
+      ));
       }
     } finally {
       if (mounted) setState(() => _isProcessing = false);

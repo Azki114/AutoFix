@@ -924,7 +924,7 @@ class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
                         minZoom: 2.0,
                         maxZoom: 18.0,
                         onPositionChanged: (pos, hasGesture) {
-                          if (mounted) _currentMapCenter = pos.center!;
+                          if (mounted) _currentMapCenter = pos.center;
                         },
                       ),
                       children: [
