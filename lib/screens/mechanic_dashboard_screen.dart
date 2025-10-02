@@ -3,7 +3,6 @@
 import 'package:autofix/screens/mechanic_reviews_screen.dart'; // Import the new reviews screen
 import 'package:flutter/material.dart';
 import 'package:autofix/main.dart' as app_nav;
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:autofix/main.dart';
 import 'package:autofix/screens/select_location_on_map_screen.dart';
 import 'package:latlong2/latlong.dart';

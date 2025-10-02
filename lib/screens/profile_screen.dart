@@ -1,6 +1,9 @@
+// lib/screens/profile_screen.dart
+
 import 'package:flutter/material.dart';
-import 'package:autofix/main.dart'; // To access the global 'supabase' client and 'snackbarKey'
-import 'package:autofix/main.dart' as app_nav; // For NavigationDrawer
+import 'package:autofix/main.dart'; // To access the global 'supabase' client and notifiers
+import 'package:autofix/main.dart' as app_nav;
+import 'package:intl/intl.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -10,64 +13,63 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  late Future<Map<String, dynamic>> _profileFuture;
+  // This future now only fetches role-specific data like reviews and details
+  Future<Map<String, dynamic>>? _detailsFuture;
   final String? _currentUserId = supabase.auth.currentUser?.id;
 
   @override
   void initState() {
     super.initState();
     if (_currentUserId != null) {
-      _profileFuture = _fetchUserProfile();
+      _detailsFuture = _fetchRoleSpecificDetails();
     }
   }
 
-  Future<Map<String, dynamic>> _fetchUserProfile() async {
+  // MODIFIED: This function now only fetches data NOT already in the global notifier
+  Future<Map<String, dynamic>> _fetchRoleSpecificDetails() async {
     if (_currentUserId == null) throw 'User is not logged in.';
+    if (userRole.value == null) throw 'User role not determined.';
 
     try {
-      // Fetch the basic profile to determine the role
-      final profileRes = await supabase
-          .from('profiles')
-          .select('full_name, role')
-          .eq('id', _currentUserId)
-          .single();
+      final role = userRole.value!;
+      Map<String, dynamic> detailsData = {};
 
-      final String role = profileRes['role'];
-      Map<String, dynamic> userProfileData = {'profile': profileRes};
-
-      // Based on the role, fetch role-specific data
       if (role == 'driver') {
         final driverRes = await supabase
             .from('drivers')
             .select('*')
             .eq('user_id', _currentUserId)
             .single();
-        userProfileData['details'] = driverRes;
+        detailsData['details'] = driverRes;
       } else if (role == 'mechanic') {
         final mechanicRes = await supabase
             .from('mechanics')
             .select('*')
             .eq('user_id', _currentUserId)
             .single();
-        userProfileData['details'] = mechanicRes;
+        detailsData['details'] = mechanicRes;
 
-        // NEW: Fetch all reviews for this mechanic
         final reviewsRes = await supabase
             .from('reviews')
             .select('*, owner:profiles!owner_id(full_name)')
             .eq('mechanic_id', _currentUserId)
             .order('created_at', ascending: false);
-        userProfileData['reviews'] = reviewsRes;
+        detailsData['reviews'] = reviewsRes;
       }
-
-      return userProfileData;
+      return detailsData;
     } catch (e) {
-      debugPrint("Error fetching user profile: $e");
-      throw 'Failed to load profile data.';
+      debugPrint("Error fetching role-specific details: $e");
+      throw 'Failed to load profile details.';
     }
   }
   
-  // NEW: Function for a mechanic to add a reply to a review
+  // This function is still used to refresh data after an action on this screen
+  void _refreshScreen() {
+    setState(() {
+      _detailsFuture = _fetchRoleSpecificDetails();
+    });
+  }
+
   Future<void> _addMechanicReply(String reviewId, String replyText) async {
     try {
       await supabase
@@ -80,12 +82,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           content: Text("Your reply has been posted."),
           backgroundColor: Colors.green,
         ));
-        // Refresh the profile to show the new reply
-        setState(() {
-          _profileFuture = _fetchUserProfile();
-        });
+        _refreshScreen();
       }
-
     } catch (e) {
       if (mounted) {
          snackbarKey.currentState?.showSnackBar(SnackBar(
@@ -96,7 +94,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  // NEW: Dialog for submitting a mechanic's reply
   void _showReplyDialog(String reviewId) {
     final replyController = TextEditingController();
     showDialog(
@@ -132,7 +129,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-
   @override
   Widget build(BuildContext context) {
     if (_currentUserId == null) {
@@ -147,36 +143,45 @@ class _ProfileScreenState extends State<ProfileScreen> {
         title: const Text('My Profile'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () {
-              setState(() {
-                _profileFuture = _fetchUserProfile();
-              });
+            icon: const Icon(Icons.edit),
+            tooltip: 'Edit Profile',
+            onPressed: () async {
+              // Navigate to Account screen and wait for it to pop
+              await Navigator.pushNamed(context, '/account');
+              // When we return, manually refresh the role-specific data
+              _refreshScreen();
             },
           ),
         ],
       ),
       drawer: const app_nav.NavigationDrawer(),
-      body: FutureBuilder<Map<String, dynamic>>(
-        future: _profileFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          if (snapshot.hasError || !snapshot.hasData) {
-            return Center(child: Text('Error: ${snapshot.error ?? "No data found."}'));
-          }
+      // NEW: This builder listens for changes to the user's basic profile info
+      body: ValueListenableBuilder<UserProfile?>(
+        valueListenable: userProfileNotifier,
+        builder: (context, userProfile, child) {
+          // This future builder now only fetches the role-specific details
+          return FutureBuilder<Map<String, dynamic>>(
+            future: _detailsFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting || userProfile == null) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.hasError || !snapshot.hasData) {
+                return Center(child: Text('Error: ${snapshot.error ?? "No data found."}'));
+              }
 
-          final data = snapshot.data!;
-          final role = data['profile']['role'];
+              final data = snapshot.data!;
+              final role = userRole.value;
 
-          if (role == 'driver') {
-            return _buildDriverProfile(data);
-          } else if (role == 'mechanic') {
-            return _buildMechanicProfile(data);
-          } else {
-            return const Center(child: Text('Unknown user role.'));
-          }
+              if (role == 'driver') {
+                return _buildDriverProfile(userProfile, data);
+              } else if (role == 'mechanic') {
+                return _buildMechanicProfile(userProfile, data);
+              } else {
+                return const Center(child: Text('Unknown user role.'));
+              }
+            },
+          );
         },
       ),
     );
@@ -184,13 +189,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   // --- Profile Widgets ---
 
-  Widget _buildDriverProfile(Map<String, dynamic> data) {
-    final profile = data['profile'];
+  Widget _buildDriverProfile(UserProfile userProfile, Map<String, dynamic> data) {
     final details = data['details'];
+    if (details == null) return const Center(child: Text('Driver details not found.'));
+    
     return ListView(
       padding: const EdgeInsets.all(16.0),
       children: [
-        _buildProfileHeader(profile['full_name'], 'Vehicle Owner'),
+        _buildProfileHeader(userProfile.avatarUrl, userProfile.fullName ?? 'Driver', 'Vehicle Owner'),
         const Divider(height: 32),
         _buildInfoTile('Vehicle Type', details['vehicle_type']),
         _buildInfoTile('Maker', details['maker']),
@@ -201,20 +207,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildMechanicProfile(Map<String, dynamic> data) {
-    final profile = data['profile'];
+  Widget _buildMechanicProfile(UserProfile userProfile, Map<String, dynamic> data) {
     final details = data['details'];
-    final reviews = (data['reviews'] as List).cast<Map<String, dynamic>>();
+    if (details == null) return const Center(child: Text('Mechanic details not found.'));
+    
+    final reviews = (data['reviews'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    final avgRating = (details['average_rating'] as num?)?.toDouble() ?? 0.0;
+    final totalRatings = details['total_ratings'] as int? ?? 0;
 
     return ListView(
       padding: const EdgeInsets.all(16.0),
       children: [
-        _buildProfileHeader(profile['full_name'], 'Mechanic'),
+        _buildProfileHeader(userProfile.avatarUrl, userProfile.fullName ?? 'Mechanic', 'Mechanic'),
         const SizedBox(height: 16),
-        _buildRatingSummary(
-          details['average_rating']?.toDouble() ?? 0.0,
-          details['total_ratings'] ?? 0,
-        ),
+        _buildRatingSummary(avgRating, totalRatings),
         const Divider(height: 32),
         _buildInfoTile('Shop Name', details['shop_name']),
         _buildInfoTile('Business Address', details['business_address']),
@@ -234,12 +240,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
   
-  Widget _buildProfileHeader(String name, String role) {
+  Widget _buildProfileHeader(String? avatarUrl, String name, String role) {
     return Column(
       children: [
         CircleAvatar(
           radius: 50,
-          child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?', style: const TextStyle(fontSize: 40)),
+          backgroundColor: Colors.blue.shade100,
+          backgroundImage: (avatarUrl != null && avatarUrl.isNotEmpty)
+              ? NetworkImage(avatarUrl)
+              : null,
+          child: (avatarUrl == null || avatarUrl.isEmpty)
+              ? Text(name.isNotEmpty ? name[0].toUpperCase() : '?', style: const TextStyle(fontSize: 40))
+              : null,
         ),
         const SizedBox(height: 16),
         Text(name, style: Theme.of(context).textTheme.headlineMedium, textAlign: TextAlign.center),
@@ -297,11 +309,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Expanded(child: Text(ownerName, style: const TextStyle(fontWeight: FontWeight.bold))),
                 Row(
                   children: List.generate(5, (index) => Icon(
-                    index < review['rating'] ? Icons.star : Icons.star_border,
+                    index < (review['rating'] ?? 0) ? Icons.star : Icons.star_border,
                     color: Colors.amber,
                     size: 18,
                   )),
@@ -309,12 +322,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ],
             ),
             const SizedBox(height: 4),
-            Row(
-              children: [
-                Icon(Icons.verified, color: Colors.green.shade700, size: 16),
-                const SizedBox(width: 4),
-                Text('Verified Service', style: TextStyle(color: Colors.green.shade700, fontSize: 12, fontWeight: FontWeight.bold)),
-              ],
+            Text(
+              DateFormat.yMMMd().format(DateTime.parse(review['created_at'])),
+              style: const TextStyle(color: Colors.grey, fontSize: 12)
             ),
             if (review['comment'] != null && review['comment'].isNotEmpty) ...[
               const SizedBox(height: 8),
@@ -356,4 +366,3 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 }
-

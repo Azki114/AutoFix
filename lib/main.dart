@@ -1,60 +1,55 @@
 // lib/main.dart
 import 'dart:async'; // Import for StreamSubscription
 
-import 'package:autofix/screens/service_history_screen.dart';
-import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import flutter_dotenv
-import 'package:firebase_core/firebase_core.dart'; // Import Firebase Core
-
-// --- App's screen imports ---
-import 'package:autofix/screens/login_screen.dart';
-import 'package:autofix/screens/register_screen.dart';
-import 'package:autofix/screens/profile_screen.dart'; // User Profile Screen
-import 'package:autofix/screens/splash_screen.dart'; // For initial loading/redirection
-import 'package:autofix/screens/vehicle_owner_map_screen.dart'; // Driver's map
-import 'package:autofix/screens/mechanic_dashboard_screen.dart'; // Import the new dashboard
-import 'package:autofix/screens/mechanic_service_requests_screen.dart';
-import 'package:autofix/screens/chat_list_screen.dart'; // Import the new ChatListScreen
-
-// --- Existing app screens ---
+import 'package:autofix/screens/account_screen.dart';
 import 'package:autofix/screens/ai_diagnosis_screen.dart';
+import 'package:autofix/screens/chat_list_screen.dart';
+import 'package:autofix/screens/login_screen.dart';
+import 'package:autofix/screens/mechanic_dashboard_screen.dart';
+import 'package:autofix/screens/mechanic_service_requests_screen.dart';
 import 'package:autofix/screens/offline_guide_screen.dart';
+import 'package:autofix/screens/profile_screen.dart';
+import 'package:autofix/screens/register_screen.dart';
+import 'package:autofix/screens/service_history_screen.dart';
 import 'package:autofix/screens/settings_screen.dart';
+import 'package:autofix/screens/splash_screen.dart';
 import 'package:autofix/screens/terms_conditions_screen.dart';
-import 'package:autofix/screens/account_screen.dart'; // Account screen from previous update
-
-// --- App Services ---
+import 'package:autofix/screens/vehicle_owner_map_screen.dart';
 import 'package:autofix/services/notification_service.dart';
 import 'package:autofix/services/request_notifier.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+// --- NEW: A simple class to hold user profile data ---
+class UserProfile {
+  final String id;
+  final String? fullName;
+  final String? avatarUrl;
+
+  UserProfile({required this.id, this.fullName, this.avatarUrl});
+}
 
 // Global Supabase client instance
 late final SupabaseClient supabase;
-
-// Define a global key for the Scaffold Messenger to show SnackBars from anywhere
 final GlobalKey<ScaffoldMessengerState> snackbarKey =
     GlobalKey<ScaffoldMessengerState>();
-
-// Create a single, globally accessible instance of the notifier
 final RequestNotifier requestNotifier = RequestNotifier();
-
-// Create a global key for the Navigator
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
-
-// Create a global ValueNotifier for the user role.
 final ValueNotifier<String?> userRole = ValueNotifier<String?>(null);
 
-Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized(); // Required for async initialization
+// --- NEW: Global ValueNotifier for the user profile ---
+final ValueNotifier<UserProfile?> userProfileNotifier =
+    ValueNotifier<UserProfile?>(null);
 
-  // Load environment variables from the .env file.
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   await dotenv.load(fileName: ".env");
 
-  // Retrieve Supabase URL and Anon Key from environment variables.
   final String? supabaseUrl = dotenv.env['SUPABASE_URL'];
   final String? supabaseAnonKey = dotenv.env['SUPABASE_ANON_KEY'];
 
-  // Check if the Supabase environment variables were successfully loaded.
   if (supabaseUrl == null ||
       supabaseUrl.isEmpty ||
       supabaseAnonKey == null ||
@@ -62,17 +57,14 @@ Future<void> main() async {
     throw Exception('Supabase environment variables are missing.');
   }
 
-  // Initialize the Supabase client.
   await Supabase.initialize(
     url: supabaseUrl,
     anonKey: supabaseAnonKey,
   );
   supabase =
-      Supabase.instance.client; // Get the client instance after initialization
+      Supabase.instance.client;
 
-  // Initialize Firebase for push notifications
   await Firebase.initializeApp();
-  // Initialize the notification service to handle FCM tokens and messages
   await NotificationService().initialize();
 
   runApp(const MyApp());
@@ -92,50 +84,53 @@ class _MyAppState extends State<MyApp> {
   @override
   void initState() {
     super.initState();
-    // Use a single, reliable listener for all auth changes.
     _authSubscription = supabase.auth.onAuthStateChange.listen((data) {
       final Session? session = data.session;
       if (session == null) {
-        // On logout, clear the role and stop listeners.
         userRole.value = null;
+        userProfileNotifier.value = null; // NEW: Clear profile on logout
         _stopListeningForRequests();
-
-        // This navigation now acts as a robust fallback for non-UI triggered sign-outs,
-        // like session expiry. The primary logout navigation is handled in the UI.
         navigatorKey.currentState
             ?.pushNamedAndRemoveUntil('/login', (route) => false);
       } else {
-        // When a user signs in or the initial session is loaded, fetch their role.
-        _fetchUserRole(session.user.id);
+        // CHANGED: This now fetches all essential user data
+        _fetchUserData(session.user.id);
       }
     });
   }
 
   @override
   void dispose() {
-    // Dispose subscriptions to prevent memory leaks
     _authSubscription?.cancel();
     _requestStreamSubscription?.cancel();
     super.dispose();
   }
 
-  Future<void> _fetchUserRole(String? userId) async {
+  // CHANGED: This function now fetches role, name, and avatar
+  Future<void> _fetchUserData(String? userId) async {
     if (userId == null) {
       userRole.value = null;
+      userProfileNotifier.value = null;
       _stopListeningForRequests();
       return;
     }
     try {
       final response = await supabase
           .from('profiles')
-          .select('role')
+          .select('role, full_name, avatar_url')
           .eq('id', userId)
           .single();
 
+      // NEW: Update the global user profile notifier
+      userProfileNotifier.value = UserProfile(
+        id: userId,
+        fullName: response['full_name'],
+        avatarUrl: response['avatar_url'],
+      );
+
       if (response['role'] != null) {
         final role = response['role'] as String;
-        userRole.value = role; // Update the global notifier
-
+        userRole.value = role;
         if (role == 'mechanic') {
           _listenForNewServiceRequests();
         } else {
@@ -154,8 +149,8 @@ class _MyAppState extends State<MyApp> {
       }
     } catch (e) {
       userRole.value = null;
+      userProfileNotifier.value = null;
       _stopListeningForRequests();
-      // Check if the widget is still in the tree before showing a snackbar.
       if (mounted) {
         snackbarKey.currentState?.showSnackBar(
           SnackBar(
@@ -168,21 +163,19 @@ class _MyAppState extends State<MyApp> {
   }
 
   void _listenForNewServiceRequests() {
-    // Ensure we don't create duplicate listeners
     _requestStreamSubscription?.cancel();
-
     _requestStreamSubscription = supabase
         .from('service_requests')
         .stream(primaryKey: ['id'])
         .eq('status', 'pending')
         .listen((data) {
-          if (data.isNotEmpty) {
-            debugPrint("New service request detected!");
-            requestNotifier.show();
-          }
-        }, onError: (error) {
-          debugPrint("Error listening to service requests: $error");
-        });
+      if (data.isNotEmpty) {
+        debugPrint("New service request detected!");
+        requestNotifier.show();
+      }
+    }, onError: (error) {
+      debugPrint("Error listening to service requests: $error");
+    });
   }
 
   void _stopListeningForRequests() {
@@ -196,13 +189,13 @@ class _MyAppState extends State<MyApp> {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       scaffoldMessengerKey: snackbarKey,
-      navigatorKey: navigatorKey, // Assign the global key for navigation
+      navigatorKey: navigatorKey,
       title: 'AutoFix App',
       theme: ThemeData(
         primarySwatch: Colors.blue,
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
-      initialRoute: '/', // This is the correct way to set the starting route.
+      initialRoute: '/',
       routes: {
         '/': (context) => const SplashScreen(),
         '/splash': (context) => const SplashScreen(),
@@ -216,11 +209,11 @@ class _MyAppState extends State<MyApp> {
         '/terms_conditions': (context) => const TermsConditionsScreen(),
         '/chat_list': (context) => const ChatListScreen(),
         '/account': (context) => const AccountScreen(),
-        '/mechanic_dashboard': (context) => const MechanicDashboardScreen(), // Corrected line from previous step
-        '/mechanic_service_requests': (context) => const MechanicServiceRequestsScreen(),
+        '/mechanic_dashboard': (context) => const MechanicDashboardScreen(),
+        '/mechanic_service_requests': (context) =>
+            const MechanicServiceRequestsScreen(),
         '/service_history': (context) => const ServiceHistoryScreen(),
       },
-      // When 'initialRoute' is set, 'home' must be null.
     );
   }
 }
@@ -233,216 +226,226 @@ class NavigationDrawer extends StatelessWidget {
     final user = supabase.auth.currentUser;
     final bool isLoggedIn = user != null;
 
-    // Listen directly to the global `userRole` notifier.
+    // CHANGED: The Drawer now listens to both role and profile notifiers
     return ValueListenableBuilder<String?>(
       valueListenable: userRole,
       builder: (context, currentRole, child) {
-        return Drawer(
-          child: ListView(
-            padding: EdgeInsets.zero,
-            children: <Widget>[
-              DrawerHeader(
-                decoration: const BoxDecoration(
-                  color: Color.fromARGB(233, 214, 251, 250),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    CircleAvatar(
-                      radius: 30,
-                      backgroundColor: Colors.white,
-                      child: Icon(
-                        isLoggedIn ? Icons.person_rounded : Icons.person_outline,
-                        size: 40,
-                        color: Colors.blue,
-                      ),
+        return ValueListenableBuilder<UserProfile?>(
+          valueListenable: userProfileNotifier,
+          builder: (context, profile, child) {
+            return Drawer(
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: <Widget>[
+                  DrawerHeader(
+                    decoration: const BoxDecoration(
+                      color: Color.fromARGB(233, 214, 251, 250),
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      isLoggedIn ? (user.email ?? 'Logged In User') : 'Guest User',
-                      style: const TextStyle(
-                        color: Colors.blue,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    if (isLoggedIn)
-                      Text(
-                        'ID: ${user.id.substring(0, 8)}...',
-                        style: const TextStyle(
-                          color: Colors.blueGrey,
-                          fontSize: 12,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        // NEW: Display user avatar
+                        CircleAvatar(
+                          radius: 30,
+                          backgroundColor: Colors.white,
+                          backgroundImage: (profile?.avatarUrl != null && profile!.avatarUrl!.isNotEmpty)
+                              ? NetworkImage(profile.avatarUrl!)
+                              : null,
+                          child: (profile?.avatarUrl == null || profile!.avatarUrl!.isEmpty)
+                              ? const Icon(Icons.person, size: 40, color: Colors.blue)
+                              : null,
                         ),
-                      ),
-                  ],
-                ),
-              ),
-              ListTile(
-                leading: const Icon(Icons.home, color: Colors.blue),
-                title: const Text('Home'),
-                onTap: () {
-                  Navigator.pop(context);
-                  if (currentRole == 'driver') {
-                    Navigator.pushReplacementNamed(context, '/vehicle_owner_map');
-                  } else if (currentRole == 'mechanic') {
-                    Navigator.pushReplacementNamed(
-                        context, '/mechanic_dashboard');
-                  } else {
-                    // Fallback to splash screen if role is unknown or not logged in
-                    Navigator.pushReplacementNamed(context, '/splash');
-                  }
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.support_agent, color: Colors.blue),
-                title: const Text('AI Diagnosis Chatbot'),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.pushReplacementNamed(context, '/ai_diagnosis');
-                },
-              ),
-              // Conditional items based on role
-              if (currentRole == 'driver') ...[
-                ListTile(
-                  leading: const Icon(Icons.map, color: Colors.blue),
-                  title: const Text('Find Mechanics'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.pushReplacementNamed(
-                        context, '/vehicle_owner_map');
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.history, color: Colors.blue),
-                  title: const Text('Service History'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.pushNamed(context, '/service_history');
-                  },
-                ),
-              ],
-              if (currentRole == 'mechanic')
-                ValueListenableBuilder<bool>(
-                  valueListenable: requestNotifier,
-                  builder: (context, hasNewRequest, child) {
-                    return ListTile(
-                      leading:
-                          const Icon(Icons.dashboard, color: Colors.blue),
-                      title: const Text('Service Requests'),
-                      trailing: hasNewRequest
-                          ? const CircleAvatar(
-                              radius: 12,
-                              backgroundColor: Colors.red,
-                              child: Text('!',
-                                  style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.bold)),
-                            )
-                          : null,
+                        const SizedBox(height: 8),
+                        // NEW: Display user's full name, fallback to email
+                        Text(
+                          isLoggedIn ? (profile?.fullName ?? user.email ?? 'User') : 'Guest User',
+                          style: const TextStyle(
+                            color: Colors.blue,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        if (isLoggedIn)
+                          Text(
+                            'ID: ${user.id.substring(0, 8)}...',
+                            style: const TextStyle(
+                              color: Colors.blueGrey,
+                              fontSize: 12,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.home, color: Colors.blue),
+                    title: const Text('Home'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      if (currentRole == 'driver') {
+                        Navigator.pushReplacementNamed(
+                            context, '/vehicle_owner_map');
+                      } else if (currentRole == 'mechanic') {
+                        Navigator.pushReplacementNamed(
+                            context, '/mechanic_dashboard');
+                      } else {
+                        Navigator.pushReplacementNamed(context, '/splash');
+                      }
+                    },
+                  ),
+                  ListTile(
+                    leading:
+                        const Icon(Icons.support_agent, color: Colors.blue),
+                    title: const Text('AI Diagnosis Chatbot'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.pushReplacementNamed(context, '/ai_diagnosis');
+                    },
+                  ),
+                  if (currentRole == 'driver') ...[
+                    ListTile(
+                      leading: const Icon(Icons.map, color: Colors.blue),
+                      title: const Text('Find Mechanics'),
                       onTap: () {
-                        requestNotifier.hide();
                         Navigator.pop(context);
-                        // Navigate to the specific requests screen, not the whole dashboard
-                        Navigator.pushNamed(
-                            context, '/mechanic_service_requests');
+                        Navigator.pushReplacementNamed(
+                            context, '/vehicle_owner_map');
                       },
-                    );
-                  },
-                ),
-              ListTile(
-                leading: const Icon(Icons.menu_book, color: Colors.blue),
-                title: const Text('Offline Repair Guide'),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.pushReplacementNamed(context, '/offline_guide');
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.chat, color: Colors.blue),
-                title: const Text('Chats'),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.pushReplacementNamed(context, '/chat_list');
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.settings, color: Colors.blue),
-                title: const Text('Settings'),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.pushReplacementNamed(context, '/settings');
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.assignment, color: Colors.blue),
-                title: const Text('Terms & Conditions'),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.pushReplacementNamed(
-                      context, '/terms_conditions');
-                },
-              ),
-              const Divider(color: Colors.blueGrey),
-              if (!isLoggedIn) ...[
-                ListTile(
-                  leading: const Icon(Icons.login, color: Colors.blue),
-                  title: const Text('Login'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.pushReplacementNamed(context, '/login');
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.app_registration, color: Colors.blue),
-                  title: const Text('Register Account'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.pushReplacementNamed(context, '/register');
-                  },
-                ),
-              ] else ...[
-                ListTile(
-                  leading: const Icon(Icons.person, color: Colors.blue),
-                  title: const Text('Profile'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.pushNamed(context, '/profile');
-                  },
-                ),
-                ListTile(
-                  leading:
-                      const Icon(Icons.account_circle, color: Colors.blue),
-                  title: const Text('Account Settings'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.pushNamed(context, '/account');
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.logout, color: Colors.red),
-                  title: const Text('Logout'),
-                  onTap: () async {
-                    Navigator.pop(context); // Close the drawer
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.history, color: Colors.blue),
+                      title: const Text('Service History'),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.pushNamed(context, '/service_history');
+                      },
+                    ),
+                  ],
+                  if (currentRole == 'mechanic')
+                    ValueListenableBuilder<bool>(
+                      valueListenable: requestNotifier,
+                      builder: (context, hasNewRequest, child) {
+                        return ListTile(
+                          leading:
+                              const Icon(Icons.dashboard, color: Colors.blue),
+                          title: const Text('Service Requests'),
+                          trailing: hasNewRequest
+                              ? const CircleAvatar(
+                                  radius: 12,
+                                  backgroundColor: Colors.red,
+                                  child: Text('!',
+                                      style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold)),
+                                )
+                              : null,
+                          onTap: () {
+                            requestNotifier.hide();
+                            Navigator.pop(context);
+                            Navigator.pushNamed(
+                                context, '/mechanic_service_requests');
+                          },
+                        );
+                      },
+                    ),
+                  ListTile(
+                    leading: const Icon(Icons.menu_book, color: Colors.blue),
+                    title: const Text('Offline Repair Guide'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.pushReplacementNamed(
+                          context, '/offline_guide');
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.chat, color: Colors.blue),
+                    title: const Text('Chats'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.pushReplacementNamed(context, '/chat_list');
+                    },
+                  ),
+                  ListTile(
+                    leading: const Icon(Icons.settings, color: Colors.blue),
+                    title: const Text('Settings'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.pushReplacementNamed(context, '/settings');
+                    },
+                  ),
+                  ListTile(
+                    leading:
+                        const Icon(Icons.assignment, color: Colors.blue),
+                    title: const Text('Terms & Conditions'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.pushReplacementNamed(
+                          context, '/terms_conditions');
+                    },
+                  ),
+                  const Divider(color: Colors.blueGrey),
+                  if (!isLoggedIn) ...[
+                    ListTile(
+                      leading: const Icon(Icons.login, color: Colors.blue),
+                      title: const Text('Login'),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.pushReplacementNamed(context, '/login');
+                      },
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.app_registration,
+                          color: Colors.blue),
+                      title: const Text('Register Account'),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.pushReplacementNamed(
+                            context, '/register');
+                      },
+                    ),
+                  ] else ...[
+                    ListTile(
+                      leading: const Icon(Icons.person, color: Colors.blue),
+                      title: const Text('Profile'),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.pushNamed(context, '/profile');
+                      },
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.account_circle,
+                          color: Colors.blue),
+                      title: const Text('Account Settings'),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.pushNamed(context, '/account');
+                      },
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.logout, color: Colors.red),
+                      title: const Text('Logout'),
+                      onTap: () async {
+                        Navigator.pop(context); // Close the drawer
 
-                    // Navigate away BEFORE signing out to prevent build errors.
-                    Navigator.pushNamedAndRemoveUntil(
-                        context, '/login', (route) => false);
+                        Navigator.pushNamedAndRemoveUntil(
+                            context, '/login', (route) => false);
 
-                    await supabase.auth.signOut();
+                        await supabase.auth.signOut();
 
-                    snackbarKey.currentState?.showSnackBar(
-                      const SnackBar(
-                        content: Text('Logged out successfully.'),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
-                  },
-                ),
-              ],
-            ],
-          ),
+                        snackbarKey.currentState?.showSnackBar(
+                          const SnackBar(
+                            content: Text('Logged out successfully.'),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ],
+              ),
+            );
+          },
         );
       },
     );

@@ -1,7 +1,6 @@
 // lib/screens/mechanic_reviews_screen.dart
 
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:autofix/main.dart'; // For supabase client
 import 'package:intl/intl.dart'; // For date formatting
 
@@ -30,7 +29,7 @@ class _MechanicReviewsScreenState extends State<MechanicReviewsScreen> {
       final response = await supabase
           .from('reviews')
           .select('*, owner:profiles!owner_id(full_name)')
-          .eq('mechanic_id', _currentUserId!)
+          .eq('mechanic_id', _currentUserId)
           .order('created_at', ascending: false);
       return response;
     } catch (e) {

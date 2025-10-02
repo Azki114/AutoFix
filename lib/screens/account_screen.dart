@@ -3,7 +3,7 @@
 import 'package:autofix/widgets/avatar.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:autofix/main.dart'; // For supabase instance and snackbarKey
+import 'package:autofix/main.dart'; // For supabase instance and all global notifiers
 
 class AccountScreen extends StatefulWidget {
   const AccountScreen({super.key});
@@ -14,7 +14,7 @@ class AccountScreen extends StatefulWidget {
 
 class _AccountScreenState extends State<AccountScreen> {
   final _fullNameController = TextEditingController();
-  final _usernameController = TextEditingController(); // Added for username
+  final _usernameController = TextEditingController();
   final _newPasswordController = TextEditingController();
 
   String? _avatarUrl;
@@ -39,9 +39,9 @@ class _AccountScreenState extends State<AccountScreen> {
     setState(() => _loading = true);
     try {
       final userId = supabase.auth.currentUser!.id;
-      // Fetch all necessary fields. Add columns in Supabase if they don't exist.
-      final data = await supabase.from('profiles') // The method 'PostgrestFilterBuilder<PostgrestList> Function([String])' is declared with 0 type parameters, but 1 type arguments are given.Try adjusting the number of type arguments.
-          .select('full_name, username, avatar_url, notifications_enabled')
+      final data = await supabase
+          .from('profiles')
+          .select('full_name, username, avatar_url, notifications_enabled') // <-- FIX IS HERE
           .eq('id', userId)
           .single();
 
@@ -69,6 +69,15 @@ class _AccountScreenState extends State<AccountScreen> {
     };
     try {
       await supabase.from('profiles').upsert(updates);
+      
+      // --- BROADCAST THE CHANGE ---
+      // This tells the side panel and other widgets about the update.
+      userProfileNotifier.value = UserProfile(
+        id: supabase.auth.currentUser!.id,
+        fullName: _fullNameController.text.trim(),
+        avatarUrl: _avatarUrl,
+      );
+      
       _showSuccessSnackBar('Profile updated successfully!');
     } on PostgrestException catch (error) {
       _showErrorSnackBar(error.message);
@@ -88,7 +97,7 @@ class _AccountScreenState extends State<AccountScreen> {
       _showSuccessSnackBar('Notification settings updated.');
     } catch (e) {
       _showErrorSnackBar('Failed to update settings.');
-      if (mounted) setState(() => _notificationsEnabled = !value); // Revert on failure
+      if (mounted) setState(() => _notificationsEnabled = !value);
     }
   }
 
@@ -102,7 +111,7 @@ class _AccountScreenState extends State<AccountScreen> {
     try {
       await supabase.auth.updateUser(UserAttributes(password: newPassword));
       _newPasswordController.clear();
-      Navigator.of(context).pop(); // Close the dialog
+      Navigator.of(context).pop();
       _showSuccessSnackBar('Password updated successfully.');
     } catch (e) {
       _showErrorSnackBar('Failed to update password.');
@@ -114,7 +123,6 @@ class _AccountScreenState extends State<AccountScreen> {
   Future<void> _deleteAccount() async {
     try {
       await supabase.functions.invoke('delete-user');
-      // The auth listener in main.dart will handle navigation after sign out.
     } catch (e) {
       _showErrorSnackBar('Failed to delete account: ${e.toString()}');
     }
@@ -137,9 +145,9 @@ class _AccountScreenState extends State<AccountScreen> {
       ),
     );
   }
-  
+
   void _showDeleteConfirmationDialog() {
-     showDialog(
+    showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete Account?'),
@@ -150,7 +158,7 @@ class _AccountScreenState extends State<AccountScreen> {
             onPressed: () {
               Navigator.of(context).pop();
               _deleteAccount();
-            }, 
+            },
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             child: const Text('Delete'),
           ),
@@ -160,13 +168,13 @@ class _AccountScreenState extends State<AccountScreen> {
   }
 
   void _showSuccessSnackBar(String message) {
-    snackbarKey.currentState
-        ?.showSnackBar(SnackBar(content: Text(message), backgroundColor: Colors.green));
+    snackbarKey.currentState?.showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: Colors.green));
   }
 
   void _showErrorSnackBar(String message) {
-    snackbarKey.currentState
-        ?.showSnackBar(SnackBar(content: Text(message), backgroundColor: Colors.red));
+    snackbarKey.currentState?.showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: Colors.red));
   }
 
   @override
@@ -182,7 +190,16 @@ class _AccountScreenState extends State<AccountScreen> {
                   imageUrl: _avatarUrl,
                   onUpload: (imageUrl) async {
                     setState(() => _avatarUrl = imageUrl);
-                    await supabase.from('profiles').upsert({'id': supabase.auth.currentUser!.id, 'avatar_url': imageUrl});
+                    await supabase.from('profiles').upsert(
+                        {'id': supabase.auth.currentUser!.id, 'avatar_url': imageUrl});
+                    
+                    // --- BROADCAST THE CHANGE ---
+                    userProfileNotifier.value = UserProfile(
+                      id: supabase.auth.currentUser!.id,
+                      fullName: _fullNameController.text.trim(),
+                      avatarUrl: imageUrl,
+                    );
+
                     _showSuccessSnackBar('Avatar updated!');
                   },
                 ),
@@ -202,14 +219,16 @@ class _AccountScreenState extends State<AccountScreen> {
                   child: Text(_loading ? 'Saving...' : 'Update Profile'),
                 ),
                 const Divider(height: 40),
-                const Text('Settings', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                const Text('Settings',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                 SwitchListTile.adaptive(
                   title: const Text('Enable Push Notifications'),
                   value: _notificationsEnabled,
                   onChanged: _updateNotificationSettings,
                 ),
                 const Divider(height: 20),
-                const Text('Security', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                const Text('Security',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                 ListTile(
                   leading: const Icon(Icons.lock_outline),
                   title: const Text('Change Password'),
@@ -221,10 +240,15 @@ class _AccountScreenState extends State<AccountScreen> {
                   onTap: () async => await supabase.auth.signOut(),
                 ),
                 const Divider(height: 40),
-                const Text('Danger Zone', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.red)),
+                const Text('Danger Zone',
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                        color: Colors.red)),
                 ListTile(
                   leading: const Icon(Icons.delete_forever, color: Colors.red),
-                  title: const Text('Delete Account', style: TextStyle(color: Colors.red)),
+                  title: const Text('Delete Account',
+                      style: TextStyle(color: Colors.red)),
                   onTap: _showDeleteConfirmationDialog,
                 ),
               ],
