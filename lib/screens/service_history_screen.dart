@@ -137,8 +137,8 @@ class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
   }
 
   void _showReviewDialog(Map<String, dynamic> request) {
-    int _rating = 0;
-    final _commentController = TextEditingController();
+    int rating = 0;
+    final commentController = TextEditingController();
 
     showModalBottomSheet(
       context: context,
@@ -169,13 +169,13 @@ class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
                     children: List.generate(5, (index) {
                       return IconButton(
                         icon: Icon(
-                          index < _rating ? Icons.star : Icons.star_border,
+                          index < rating ? Icons.star : Icons.star_border,
                           color: Colors.amber,
                           size: 40,
                         ),
                         onPressed: () {
                           setModalState(() {
-                            _rating = index + 1;
+                            rating = index + 1;
                           });
                         },
                       );
@@ -183,7 +183,7 @@ class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
                   ),
                   const SizedBox(height: 16),
                   TextField(
-                    controller: _commentController,
+                    controller: commentController,
                     decoration: const InputDecoration(
                       labelText: 'Add a public comment (optional)',
                       border: OutlineInputBorder(),
@@ -194,12 +194,12 @@ class _ServiceHistoryScreenState extends State<ServiceHistoryScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: _rating > 0
+                      onPressed: rating > 0
                           ? () {
                               Navigator.of(context).pop(); 
                               _submitReview(
-                                rating: _rating,
-                                comment: _commentController.text,
+                                rating: rating,
+                                comment: commentController.text,
                                 serviceRequestId: request['id'],
                                 mechanicId: request['mechanic_id'],
                               );

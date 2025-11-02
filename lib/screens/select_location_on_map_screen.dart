@@ -140,6 +140,7 @@ class _SelectLocationOnMapScreenState extends State<SelectLocationOnMapScreen> {
               initialCenter: _selectedLocation,
               initialZoom: 15.0,
               onPositionChanged: (pos, hasGesture) {
+                // ignore: unnecessary_null_comparison
                 if (hasGesture && pos.center != null) {
                   setState(() {
                     _selectedLocation = pos.center;

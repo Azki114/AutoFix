@@ -1,8 +1,9 @@
 // lib/screens/ai_diagnosis_screen.dart
+import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:autofix/main.dart' as app_nav; // Import main.dart for NavigationDrawer
-import 'package:google_generative_ai/google_generative_ai.dart'; // Import Gemini SDK
-import 'package:flutter_dotenv/flutter_dotenv.dart'; // Import flutter_dotenv for API key
+import 'package:autofix/main.dart' as app_nav;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:http/http.dart' as http;
 
 class AiDiagnosisScreen extends StatefulWidget {
   const AiDiagnosisScreen({super.key});
@@ -15,95 +16,88 @@ class _AiDiagnosisScreenState extends State<AiDiagnosisScreen> {
   final TextEditingController _textController = TextEditingController();
   final List<ChatMessage> _messages = [];
   bool _isLoading = false;
-  late GenerativeModel _model;
-  late ChatSession _chat; // Use ChatSession for multi-turn conversations
+
+  late final String _apiKey;
+  final List<Map<String, String>> _chatHistory = [];
 
   @override
   void initState() {
     super.initState();
-    _initializeGeminiModel();
+    _initializeChat();
   }
 
-  void _initializeGeminiModel() {
-    final String? apiKey = dotenv.env['GEMINI_API_KEY'];
-    if (apiKey == null || apiKey.isEmpty) {
-      // Provide user-friendly message instead of throwing an unhandled exception
-      _showErrorMessage(
-          'API Key not found. Please add GEMINI_API_KEY to your .env file.');
+  void _initializeChat() {
+    _apiKey = dotenv.env['OPENAI_API_KEY'] ?? '';
+    if (_apiKey.isEmpty) {
+      _showErrorMessage('API Key not found. Please add OPENAI_API_KEY to your .env file.');
       return;
     }
 
-    _model = GenerativeModel(
-      model: 'gemini-1.5-flash', // Changed back to 'gemini-1.5-flash' to avoid "model not found" error
-      apiKey: apiKey,
-    );
-
-    // Initialize the chat session with a strong system instruction
-    // This is vital for making the chatbot focus ONLY on vehicle breakdowns
-    final String systemInstruction = """
-      You are an AI assistant named AUTOFIX Bot, specialized in diagnosing common vehicle breakdown and maintenance problems. 
-      Your primary goal is to help users understand what might be wrong with their car based on their description of symptoms, 
-      and provide general troubleshooting advice.
-
-      When responding:
-      - Always acknowledge the user's vehicle problem.
-      - Ask clarifying questions if the description is vague.
-      - Suggest possible causes for the symptoms (e.g., "This could be a battery issue, a starter problem, or a loose connection.").
-      - Recommend general, safe troubleshooting steps the user can perform (e.g., "Check battery terminals for corrosion," "Listen for specific sounds.").
-      - Advise seeking professional mechanic help for complex, serious, or unsafe issues.
-      - Maintain a helpful and informative tone.
-      - **CRITICAL**: If a query is clearly **outside the scope of vehicle breakdowns or maintenance**, politely state that you can only assist with car-related problems.
-        Example: "I can only help with vehicle breakdown and maintenance questions. Please describe your car's issue."
-      - **DO NOT** provide medical advice, financial advice, legal advice, or any information unrelated to vehicles.
-      - **DO NOT** promise a definitive fix or guarantee accuracy.
-      - **DO NOT** ask for personal information.
-      - Keep responses focused and concise.
+    const String systemInstruction = """
+      You are an AI assistant named AUTOFIX Bot, specialized in diagnosing common vehicle breakdown and maintenance problems. Your primary goal is to help users understand what might be wrong with their car and provide general troubleshooting advice. If a query is clearly outside this scope, politely state you can only assist with car-related problems. Do not ask for personal information.
       """;
-
-    _chat = _model.startChat(history: [
-      Content.text(systemInstruction),
-      // Optionally, add few-shot examples here to further guide the model
-      // Example:
-      // Content.text('User: My car makes a loud grinding noise when I brake.',
-      //             'Bot: A grinding noise during braking often indicates worn brake pads or rotors. It\'s important to get this checked by a mechanic as soon as possible for your safety. Does the sound happen constantly or only when you press the brake pedal?'),
-    ]);
+    
+    // The "system" message sets the behavior for the whole conversation
+    _chatHistory.add({'role': 'system', 'content': systemInstruction});
+    
+    const String firstMessage = 'Hello! I am AUTOFIX Bot. How can I help you with your vehicle today?';
+    _messages.insert(0, ChatMessage(text: firstMessage, isUser: false));
   }
 
-  // --- Displays a simple error message to the user ---
   void _showErrorMessage(String message) {
-    if (mounted) { // Ensure widget is still in the tree before showing SnackBar
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: Colors.red,
-        ),
+        SnackBar(content: Text(message), backgroundColor: Colors.red),
       );
     }
   }
 
-  // --- Core function to send message to Gemini and get response ---
   Future<void> _sendMessage() async {
     final text = _textController.text.trim();
-    if (text.isEmpty || _isLoading) return; // Prevent sending empty messages or multiple messages
+    if (text.isEmpty || _isLoading || _apiKey.isEmpty) return;
 
     setState(() {
-      _messages.add(ChatMessage(text: text, isUser: true)); // Add user message
+      _messages.insert(0, ChatMessage(text: text, isUser: true));
       _textController.clear();
-      _isLoading = true; // Show loading indicator
+      _isLoading = true;
     });
 
-    try {
-      final response = await _chat.sendMessage(Content.text(text));
+    _chatHistory.add({'role': 'user', 'content': text});
 
-      setState(() {
-        _messages.add(ChatMessage(text: response.text ?? 'No response.', isUser: false));
-        _isLoading = false; // Hide loading indicator
-      });
+    try {
+      final response = await http.post(
+        Uri.parse('https://api.openai.com/v1/chat/completions'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $_apiKey', // OpenAI uses a Bearer token
+        },
+        body: jsonEncode({
+          'model': 'gpt-3.5-turbo', // The standard, fast model from OpenAI
+          'messages': _chatHistory,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final decodedResponse = jsonDecode(utf8.decode(response.bodyBytes));
+        final responseText = decodedResponse['choices'][0]['message']['content'] as String;
+
+        _chatHistory.add({'role': 'assistant', 'content': responseText});
+
+        setState(() {
+          _messages.insert(0, ChatMessage(text: responseText, isUser: false));
+          _isLoading = false;
+        });
+      } else {
+        final errorBody = jsonDecode(response.body);
+        throw 'API Error (${response.statusCode}): ${errorBody['error']['message']}';
+      }
     } catch (e) {
+      _showErrorMessage(e.toString());
       setState(() {
-        _messages.add(ChatMessage(text: 'Error: ${e.toString()}', isUser: false));
-        _isLoading = false; // Hide loading indicator
+        _messages.insert(0, ChatMessage(text: 'Error: Could not get a response.', isUser: false));
+        _isLoading = false;
       });
+      _chatHistory.removeLast();
     }
   }
 
@@ -117,36 +111,27 @@ class _AiDiagnosisScreenState extends State<AiDiagnosisScreen> {
         centerTitle: true,
         elevation: 1,
       ),
-      drawer: const app_nav.NavigationDrawer(), // Your NavigationDrawer
+      drawer: const app_nav.NavigationDrawer(),
       body: Column(
         children: [
           Expanded(
             child: ListView.builder(
               padding: const EdgeInsets.all(8.0),
-              reverse: true, // Show latest messages at the bottom
+              reverse: true,
               itemCount: _messages.length,
               itemBuilder: (context, index) {
-                final message = _messages[_messages.length - 1 - index]; // Display in reverse order
+                final message = _messages[index];
                 return Align(
                   alignment: message.isUser ? Alignment.centerRight : Alignment.centerLeft,
                   child: Container(
                     margin: const EdgeInsets.symmetric(vertical: 4.0),
-                    padding: const EdgeInsets.all(10.0),
+                    padding: const EdgeInsets.all(12.0),
                     decoration: BoxDecoration(
                       color: message.isUser ? Colors.blue[100] : Colors.grey[200],
-                      borderRadius: BorderRadius.circular(12.0),
-                      boxShadow: [
-                        BoxShadow(
-                          // ignore: deprecated_member_use
-                          color: Colors.grey.withOpacity(0.2),
-                          spreadRadius: 1,
-                          blurRadius: 3,
-                          offset: const Offset(0, 2), // changes position of shadow
-                        ),
-                      ],
+                      borderRadius: BorderRadius.circular(16.0),
                     ),
                     constraints: BoxConstraints(
-                      maxWidth: MediaQuery.of(context).size.width * 0.75, // Max width for chat bubbles
+                      maxWidth: MediaQuery.of(context).size.width * 0.75,
                     ),
                     child: Text(message.text),
                   ),
@@ -154,11 +139,7 @@ class _AiDiagnosisScreenState extends State<AiDiagnosisScreen> {
               },
             ),
           ),
-          if (_isLoading)
-            const LinearProgressIndicator(
-              color: Colors.blue,
-              backgroundColor: Colors.blueAccent,
-            ),
+          if (_isLoading) const LinearProgressIndicator(),
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: Row(
@@ -172,15 +153,8 @@ class _AiDiagnosisScreenState extends State<AiDiagnosisScreen> {
                         borderRadius: BorderRadius.circular(25.0),
                         borderSide: const BorderSide(color: Colors.blue),
                       ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(25.0),
-                        borderSide: BorderSide(color: Colors.blue.shade300),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(25.0),
-                        borderSide: const BorderSide(color: Colors.blue, width: 2.0),
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
+                      contentPadding:
+                          const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
                     ),
                     onSubmitted: (value) => _sendMessage(),
                   ),
@@ -193,7 +167,8 @@ class _AiDiagnosisScreenState extends State<AiDiagnosisScreen> {
                       ? const SizedBox(
                           width: 24.0,
                           height: 24.0,
-                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.0),
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 3.0),
                         )
                       : const Icon(Icons.send, color: Colors.white),
                 ),
@@ -206,7 +181,6 @@ class _AiDiagnosisScreenState extends State<AiDiagnosisScreen> {
   }
 }
 
-// Simple data model for chat messages
 class ChatMessage {
   final String text;
   final bool isUser;

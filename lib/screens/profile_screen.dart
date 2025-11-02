@@ -235,7 +235,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Text('You have no reviews yet.'),
           ))
         else
-          ...reviews.map((review) => _buildReviewCard(review)).toList(),
+          ...reviews.map((review) => _buildReviewCard(review)),
       ],
     );
   }

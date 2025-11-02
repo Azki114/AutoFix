@@ -16,7 +16,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   bool _passwordVisible = false;
-  bool _isLoading = false; // New loading state for the button
+  bool _isLoading = false;
 
   @override
   void dispose() {
@@ -26,7 +26,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _showSnackBar(String message, Color color) {
-    if (mounted) { // Ensure widget is still in the tree before showing SnackBar
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(message),
@@ -38,14 +38,14 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _signIn() async {
-    if (_isLoading) return; // Prevent multiple submissions
+    if (_isLoading) return;
     if (!_formKey.currentState!.validate()) {
       _showSnackBar('Please enter valid credentials.', Colors.red);
       return;
     }
 
     setState(() {
-      _isLoading = true; // Show loading indicator
+      _isLoading = true;
     });
 
     try {
@@ -56,25 +56,84 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (response.user != null) {
         _showSnackBar('Login successful!', Colors.green);
-        // Navigate to the home screen or dashboard after successful login
-        // The '/' route in main.dart will handle role-based redirection
         if (mounted) {
           Navigator.pushReplacementNamed(context, '/');
         }
       } else {
-        // This block might be hit if signInWithPassword doesn't throw but user is null
         _showSnackBar('Login failed. Please check your email and password.', Colors.red);
       }
     } on AuthException catch (e) {
-      // Handle specific Supabase Auth errors
       _showSnackBar('Authentication error: ${e.message}', Colors.red);
     } catch (e) {
       _showSnackBar('An unexpected error occurred: ${e.toString()}', Colors.red);
     } finally {
-      setState(() {
-        _isLoading = false; // Always reset loading state
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
+  }
+
+  // --- NEW: Function to handle the forgot password logic ---
+  Future<void> _forgotPassword() async {
+    final email = await _showForgotPasswordDialog();
+    if (email == null || email.isEmpty) return;
+
+    setState(() => _isLoading = true);
+    try {
+      // This sends the password reset email
+      await supabase.auth.resetPasswordForEmail(email);
+      if (mounted) {
+        _showSnackBar('Password reset link sent to $email.', Colors.green);
+      }
+    } on AuthException catch (e) {
+      _showSnackBar(e.message, Colors.red);
+    } catch (e) {
+      _showSnackBar('An unexpected error occurred: $e', Colors.red);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // --- NEW: Dialog to ask for the user's email ---
+  Future<String?> _showForgotPasswordDialog() {
+    final emailDialogController = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Forgot Password'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Enter your email to receive a password reset link.'),
+              const SizedBox(height: 16),
+              TextField(
+                controller: emailDialogController,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(
+                  labelText: 'Email',
+                  icon: Icon(Icons.email),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(context).pop(emailDialogController.text.trim());
+              },
+              child: const Text('Send Link'),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
@@ -88,32 +147,31 @@ class _LoginScreenState extends State<LoginScreen> {
         elevation: 1,
       ),
       drawer: const app_nav.NavigationDrawer(),
-      backgroundColor: const Color.fromARGB(255, 230, 240, 255), // Light blue background
+      backgroundColor: const Color.fromARGB(255, 230, 240, 255),
       body: SafeArea(
-        child: Center( // Center the card
+        child: Center(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24.0),
-            child: Card( // Use a Card for the white, rounded container
-              margin: const EdgeInsets.symmetric(horizontal: 16.0), // Add some horizontal margin
+            child: Card(
+              margin: const EdgeInsets.symmetric(horizontal: 16.0),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20.0), // Rounded corners for the card
+                borderRadius: BorderRadius.circular(20.0),
               ),
-              elevation: 8, // Add shadow
+              elevation: 8,
               child: Padding(
                 padding: const EdgeInsets.all(24.0),
                 child: Form(
                   key: _formKey,
                   child: Column(
-                    mainAxisSize: MainAxisSize.min, // Make column only take required height
+                    mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // Large Arrow Icon
                       Align(
                         alignment: Alignment.center,
                         child: Icon(
-                          Icons.arrow_forward, // Changed icon to match image
+                          Icons.arrow_forward,
                           size: 80,
-                          color: Colors.blue[600], // Slightly darker blue for icon
+                          color: Colors.blue[600],
                         ),
                       ),
                       const SizedBox(height: 16),
@@ -121,9 +179,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         'Welcome Back!',
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                          fontSize: 28, // Increased font size
+                          fontSize: 28,
                           fontWeight: FontWeight.bold,
-                          color: Colors.black87, // Darker text for prominence
+                          color: Colors.black87,
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -140,9 +198,8 @@ class _LoginScreenState extends State<LoginScreen> {
                         keyboardType: TextInputType.emailAddress,
                         decoration: InputDecoration(
                           labelText: 'Email',
-                          hintText: 'you@example.com', // Updated hint text
+                          hintText: 'you@example.com',
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                          // Removed prefixIcon to match the image
                         ),
                         validator: (value) {
                           if (value == null || value.isEmpty) {
@@ -164,7 +221,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           labelText: 'Password',
                           hintText: '••••••••',
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                          // Removed prefixIcon to match the image
                           suffixIcon: IconButton(
                             icon: Icon(
                               _passwordVisible ? Icons.visibility : Icons.visibility_off,
@@ -187,11 +243,23 @@ class _LoginScreenState extends State<LoginScreen> {
                           return null;
                         },
                       ),
-                      const SizedBox(height: 24),
+                      
+                      // --- NEW: FORGOT PASSWORD BUTTON ---
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: _isLoading ? null : _forgotPassword,
+                          child: const Text(
+                            'Forgot Password?',
+                             style: TextStyle(color: Colors.blueGrey),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12), // Adjusted spacing
 
                       // Login Button
                       ElevatedButton(
-                        onPressed: _isLoading ? null : _signIn, // Disable when loading
+                        onPressed: _isLoading ? null : _signIn,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.blue,
                           padding: const EdgeInsets.symmetric(vertical: 16),
@@ -210,7 +278,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ),
                               )
                             : const Text(
-                                'Log In', // Changed text to match image
+                                'Log In',
                                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
                               ),
                       ),
@@ -222,7 +290,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           Navigator.pushReplacementNamed(context, '/register');
                         },
                         child: const Text(
-                          'Don\'t have an account? Sign up', // Updated text to match image
+                          'Don\'t have an account? Sign up',
                           style: TextStyle(color: Colors.blue, decoration: TextDecoration.underline),
                         ),
                       ),

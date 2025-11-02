@@ -46,6 +46,7 @@ flutter:
   assets:
     - assets/guides/
     - assets/videos/
+    - assets/
     - .env
   
 flutter_launcher_icons:

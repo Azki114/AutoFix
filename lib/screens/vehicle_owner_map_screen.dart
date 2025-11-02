@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:autofix/main.dart' as app_nav;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:autofix/main.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
@@ -314,10 +313,6 @@ class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
                     mechanic['specialties']?.toString() ?? 'N/A',
                     mechanic['certifications']?.toString() ?? 'N/A',
                     mechanic['years_experience']?.toString() ?? 'N/A',
-                    mechanic['base_rate_php']?.toString() ?? 'N/A',
-                    mechanic['pricing_unit']?.toString() ?? 'N/A',
-                    mechanic['minimum_charge_php']?.toString() ?? 'N/A',
-                    mechanic['service_radius_km']?.toString() ?? 'N/A',
                   );
                 },
                 child: const Icon(
@@ -526,11 +521,7 @@ class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
       String address,
       String specialties,
       String certifications,
-      String yearsExperience,
-      String baseRate,
-      String pricingUnit,
-      String minimumCharge,
-      String serviceRadius) {
+      String yearsExperience,) {
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -543,9 +534,6 @@ class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
                 Text('Specialties: $specialties'),
                 Text('Certifications: $certifications'),
                 Text('Years Experience: $yearsExperience'),
-                Text('Base Rate: ₱$baseRate per $pricingUnit'),
-                Text('Minimum Charge: ₱$minimumCharge'),
-                Text('Service Radius: $serviceRadius km'),
               ],
             ),
           ),
@@ -692,7 +680,7 @@ class _VehicleOwnerMapScreenState extends State<VehicleOwnerMapScreen> {
           content: TextField(
             controller: notesController,
             decoration: const InputDecoration(
-                hintText: 'Describe your vehicle issue (optional)'),
+                hintText: 'Describe your vehicle issue and vehicle information...'),
             maxLines: 3,
           ),
           actions: <Widget>[

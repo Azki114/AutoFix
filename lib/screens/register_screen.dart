@@ -1,12 +1,14 @@
 // lib/screens/register_screen.dart
 import 'dart:convert'; // For JSON decoding
+// NEW: Import for File
 import 'package:flutter/material.dart';
 import 'package:autofix/main.dart' as app_nav;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:autofix/screens/select_location_on_map_screen.dart';
 import 'package:autofix/screens/terms_conditions_screen.dart';
-import 'package:http/http.dart' as http; // NEW: Import http package for Nominatim
+import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart'; // NEW: Import image_picker
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -49,6 +51,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _agreedToTerms = false;
   bool _isRegistering = false;
   bool _isGeocodingAddress = false;
+  
+  // --- NEW STATE VARIABLES FOR FILE UPLOADS ---
+  XFile? _idFile;
+  XFile? _certificateFile;
+  final ImagePicker _picker = ImagePicker();
 
   @override
   void dispose() {
@@ -82,7 +89,52 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
-  Future<void> _rollbackRegistration(String? userId, AccountType? accountType) async {
+  // --- NEW: Helper function to pick a file ---
+  Future<void> _pickFile(bool isId) async {
+    final XFile? pickedFile = await _picker.pickImage(source: ImageSource.gallery);
+    if (pickedFile != null) {
+      setState(() {
+        if (isId) {
+          _idFile = pickedFile;
+        } else {
+          _certificateFile = pickedFile;
+        }
+      });
+    }
+  }
+
+  // --- NEW: Helper function to upload a file to the private bucket ---
+  Future<String?> _uploadFileToBucket(XFile file, String bucket, String userId) async {
+    try {
+      final fileBytes = await file.readAsBytes();
+      final fileExt = file.name.split('.').last;
+      final fileName = '${DateTime.now().millisecondsSinceEpoch}.$fileExt';
+      final filePath = '$userId/$fileName'; // Store in a user-specific folder
+
+      await app_nav.supabase.storage.from(bucket).uploadBinary(
+            filePath,
+            fileBytes,
+            fileOptions: FileOptions(contentType: file.mimeType),
+          );
+      return filePath; // Return the path for database storage
+    } catch (e) {
+      _showSnackBar('File upload failed: ${e.toString()}', Colors.red);
+      return null;
+    }
+  }
+
+  // --- MODIFIED: Rollback now also deletes uploaded files ---
+  Future<void> _rollbackRegistration(String? userId, AccountType? accountType, List<String> uploadedFilePaths) async {
+    // 1. Delete uploaded files from storage
+    if (uploadedFilePaths.isNotEmpty) {
+      try {
+        await app_nav.supabase.storage.from('user_documents').remove(uploadedFilePaths);
+      } catch (e) {
+        _showSnackBar('Failed to clean up storage files.', Colors.orange);
+      }
+    }
+
+    // 2. Delete database entries
     if (userId != null) {
       try {
         await app_nav.supabase.from('profiles').delete().eq('id', userId);
@@ -99,6 +151,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   Future<void> _getAddressFromNominatim(LatLng point) async {
+    // ... (This function is unchanged)
     setState(() {
       _isGeocodingAddress = true;
       _businessAddressController.text = 'Fetching address...';
@@ -140,6 +193,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
+  // --- MODIFIED: Main registration logic now includes file uploads ---
   Future<void> _registerAccount() async {
     if (_isRegistering || _isGeocodingAddress) return;
 
@@ -151,6 +205,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _showSnackBar('Please select an account type (Driver or Mechanic).', Colors.red);
       return;
     }
+    
+    // --- NEW: Add validation for mandatory ID file ---
+    if (_idFile == null) {
+      _showSnackBar('Please upload a valid ID.', Colors.red);
+      return;
+    }
+    
     if (!_agreedToTerms) {
       _showSnackBar('You must agree to the Terms and Conditions.', Colors.red);
       return;
@@ -173,6 +234,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
     String? userId;
     AccountType? registeredAccountType = _selectedAccountType;
+    List<String> uploadedFilePaths = []; // To track files for rollback
 
     try {
       final String email = _emailController.text.trim();
@@ -180,6 +242,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       final String fullName = _fullNameController.text.trim();
       final String phoneNumber = _phoneNumberController.text.trim();
 
+      // 1. Sign up the user
       final AuthResponse authResponse = await app_nav.supabase.auth.signUp(
         email: email,
         password: password,
@@ -188,19 +251,44 @@ class _RegisterScreenState extends State<RegisterScreen> {
       final User? user = authResponse.user;
 
       if (user == null) {
-        _showSnackBar('Registration failed: User account could not be created. Check email/password requirements.', Colors.red);
+        _showSnackBar('Registration failed: User account could not be created.', Colors.red);
         return;
       }
 
       userId = user.id;
 
+      // 2. Upload Valid ID (mandatory)
+      final String? idFilePath = await _uploadFileToBucket(_idFile!, 'user_documents', userId);
+      if (idFilePath == null) {
+        _showSnackBar('Failed to upload ID. Registration cancelled.', Colors.red);
+        await _rollbackRegistration(userId, registeredAccountType, uploadedFilePaths);
+        return;
+      }
+      uploadedFilePaths.add(idFilePath);
+
+      // 3. Upload Certificate (optional, for mechanics)
+      String? certFilePath;
+      if (_selectedAccountType == AccountType.mechanic && _certificateFile != null) {
+        certFilePath = await _uploadFileToBucket(_certificateFile!, 'user_documents', userId);
+        if (certFilePath == null) {
+          _showSnackBar('Failed to upload certificate. Registration cancelled.', Colors.red);
+          await _rollbackRegistration(userId, registeredAccountType, uploadedFilePaths);
+          return;
+        }
+        uploadedFilePaths.add(certFilePath);
+      }
+
+      // 4. Insert into 'profiles' table
       await app_nav.supabase.from('profiles').insert({
         'id': userId,
         'full_name': fullName,
         'phone_number': phoneNumber,
         'role': _selectedAccountType == AccountType.driver ? 'driver' : 'mechanic',
+        'valid_id_url': idFilePath, // NEW: Save the ID file path
+        'is_verified': false,      // NEW: Set verification to false by default
       });
 
+      // 5. Insert into role-specific table
       if (_selectedAccountType == AccountType.driver) {
         await app_nav.supabase.from('drivers').insert({
           'user_id': userId,
@@ -212,9 +300,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
           'year': _yearController.text.trim(),
           'license_plate': _licensePlateController.text.trim(),
         });
-        _showSnackBar('Driver account created successfully! Please verify your email.', Colors.green);
-        _resetForm();
-        if (mounted) Navigator.pushReplacementNamed(context, '/login');
       } else if (_selectedAccountType == AccountType.mechanic) {
         await app_nav.supabase.from('mechanics').insert({
           'user_id': userId,
@@ -226,19 +311,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
           'business_address': _businessAddressController.text.trim(),
           'latitude': _mechanicLatitudeLongitude!.latitude,
           'longitude': _mechanicLatitudeLongitude!.longitude,
+          'certificate_url': certFilePath, // NEW: Save the certificate file path
         });
-        _showSnackBar('Mechanic account created successfully! Please verify your email.', Colors.green);
-        _resetForm();
-        if (mounted) Navigator.pushReplacementNamed(context, '/login');
       }
+
+      _showSnackBar('Registration successful! Please wait for admin verification.', Colors.green);
+      _resetForm();
+      if (mounted) Navigator.pushReplacementNamed(context, '/login');
+
     } on AuthException catch (e) {
       _showSnackBar('Authentication error: ${e.message}', Colors.red);
     } on PostgrestException catch (e) {
       _showSnackBar('Database error: ${e.message}', Colors.red);
-      await _rollbackRegistration(userId, registeredAccountType);
+      await _rollbackRegistration(userId, registeredAccountType, uploadedFilePaths);
     } catch (e) {
-      _showSnackBar('An unexpected error occurred during registration: ${e.toString()}', Colors.red);
-      await _rollbackRegistration(userId, registeredAccountType);
+      _showSnackBar('An unexpected error occurred: ${e.toString()}', Colors.red);
+      await _rollbackRegistration(userId, registeredAccountType, uploadedFilePaths);
     } finally {
       setState(() {
         _isRegistering = false;
@@ -246,6 +334,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
+  // --- MODIFIED: Reset form now also clears files ---
   void _resetForm() {
     _formKey.currentState?.reset();
     _fullNameController.clear();
@@ -271,6 +360,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _passwordVisible = false;
       _mechanicLatitudeLongitude = null;
       _isGeocodingAddress = false;
+      _idFile = null; // NEW
+      _certificateFile = null; // NEW
     });
   }
 
@@ -301,6 +392,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   style: TextStyle(fontSize: 18, color: Colors.blueGrey),
                 ),
                 const SizedBox(height: 24),
+                // --- Basic Info ---
                 _buildTextField(_fullNameController, 'Full Name', 'Enter your full name', (value) {
                   if (value == null || value.isEmpty) {
                     return 'Please enter your full name';
@@ -358,6 +450,21 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   },
                 ),
                 const SizedBox(height: 24),
+
+                // --- NEW: Verification Section ---
+                const Text(
+                  'Verification Documents',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.blueGrey),
+                ),
+                const SizedBox(height: 10),
+                _buildFileUploadButton(
+                  title: 'Upload Valid ID (Required)',
+                  file: _idFile,
+                  onPressed: () => _pickFile(true),
+                ),
+                const SizedBox(height: 10),
+                // --- End Verification Section ---
+
                 const Text(
                   'Account Type:',
                   style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.blueGrey),
@@ -474,6 +581,34 @@ class _RegisterScreenState extends State<RegisterScreen> {
       validator: validator,
     );
   }
+
+  // --- NEW: Helper widget for file upload buttons ---
+  Widget _buildFileUploadButton({
+    required String title,
+    required XFile? file,
+    required VoidCallback onPressed,
+  }) {
+    bool isUploaded = file != null;
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      icon: Icon(
+        isUploaded ? Icons.check_circle : Icons.upload_file,
+        color: isUploaded ? Colors.green : Colors.black54,
+      ),
+      label: Text(
+        isUploaded ? file.name.split('/').last : title,
+        style: TextStyle(
+          color: isUploaded ? Colors.green : Colors.black54,
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+      style: OutlinedButton.styleFrom(
+        side: BorderSide(color: isUploaded ? Colors.green : Colors.grey),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+      ),
+    );
+  }
+
 
   Widget _buildDriverDetailsForm() {
     return Column(
@@ -621,8 +756,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
           }
           return null;
         }, keyboardType: TextInputType.number),
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
 
+        // --- NEW: Certificate Upload Button ---
+        _buildFileUploadButton(
+          title: 'Upload Certificate (Optional)',
+          file: _certificateFile,
+          onPressed: () => _pickFile(false),
+        ),
+        const SizedBox(height: 24),
+        // --- End New Button ---
+        
         const Text(
           'Location & Service:',
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.blue),
@@ -684,4 +828,3 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 }
-

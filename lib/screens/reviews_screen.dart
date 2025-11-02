@@ -87,7 +87,7 @@ class _ReviewsScreenState extends State<ReviewsScreen> {
                   ),
                 )
               else
-                ...reviews.map((review) => _buildReviewCard(review)).toList(),
+                ...reviews.map((review) => _buildReviewCard(review)),
             ],
           );
         },

@@ -845,7 +845,7 @@ Regularly checking your vehicle's engine is crucial for its longevity and your s
             title: 'Basic Engine Check', // Title can be more general now
             description: 'A visual and text guide on performing a basic engine check.',
             icon: Icons.play_circle_fill,
-            videoAssetPath: 'assets/videos/testing.mp4', // Your video asset path
+            videoAssetPath: 'assets/videos/basicenginescheck.mp4', // Your video asset path
             markdownContent: _basicEngineCheckContent, // Now providing markdown content
           ),
           const SizedBox(height: 10), // Spacing between cards
@@ -855,8 +855,10 @@ Regularly checking your vehicle's engine is crucial for its longevity and your s
             context,
             title: 'Engine Starting Issues',
             description: 'Troubleshoot common reasons why your vehicle\'s engine might not start.',
-            markdownContent: _engineStartingGuideContent,
             icon: Icons.power_settings_new,
+            videoAssetPath: 'assets/videos/',
+            markdownContent: _engineStartingGuideContent,
+            
           ),
           _buildGuideCard(
             context,
@@ -864,6 +866,7 @@ Regularly checking your vehicle's engine is crucial for its longevity and your s
             description: 'Step-by-step instructions on how to safely change a flat tire on your vehicle.',
             markdownContent: _flatTireGuideContent,
             icon: Icons.tire_repair,
+            videoAssetPath: 'assets/videos/',
           ),
           _buildGuideCard(
             context,
@@ -871,6 +874,7 @@ Regularly checking your vehicle's engine is crucial for its longevity and your s
             description: 'Learn how to identify and address common battery-related problems in your vehicle.',
             markdownContent: _batteryDiagnosisGuideContent,
             icon: Icons.battery_charging_full,
+            videoAssetPath: 'assets/videos/',
           ),
           _buildGuideCard(
             context,
@@ -878,6 +882,7 @@ Regularly checking your vehicle's engine is crucial for its longevity and your s
             description: 'A guide to inspecting your vehicle\'s brake system for common issues.',
             markdownContent: _brakeInspectionGuideContent,
             icon: Icons.car_crash,
+            videoAssetPath: 'assets/videos/',
           ),
           _buildGuideCard(
             context,
@@ -885,6 +890,7 @@ Regularly checking your vehicle's engine is crucial for its longevity and your s
             description: 'Step-by-step guide on how to perform a basic oil change for your vehicle.',
             markdownContent: _oilChangeGuideContent,
             icon: Icons.oil_barrel,
+            videoAssetPath: 'assets/videos/',
           ),
           _buildGuideCard(
             context,
@@ -892,6 +898,7 @@ Regularly checking your vehicle's engine is crucial for its longevity and your s
             description: 'Diagnose and address common causes of an overheating engine in your vehicle.',
             markdownContent: _overheatingEngineGuideContent,
             icon: Icons.thermostat,
+            videoAssetPath: 'assets/videos/',
           ),
         ],
       ),

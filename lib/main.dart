@@ -93,7 +93,6 @@ class _MyAppState extends State<MyApp> {
         navigatorKey.currentState
             ?.pushNamedAndRemoveUntil('/login', (route) => false);
       } else {
-        // CHANGED: This now fetches all essential user data
         _fetchUserData(session.user.id);
       }
     });
@@ -106,7 +105,6 @@ class _MyAppState extends State<MyApp> {
     super.dispose();
   }
 
-  // CHANGED: This function now fetches role, name, and avatar
   Future<void> _fetchUserData(String? userId) async {
     if (userId == null) {
       userRole.value = null;
@@ -121,7 +119,6 @@ class _MyAppState extends State<MyApp> {
           .eq('id', userId)
           .single();
 
-      // NEW: Update the global user profile notifier
       userProfileNotifier.value = UserProfile(
         id: userId,
         fullName: response['full_name'],
@@ -132,7 +129,8 @@ class _MyAppState extends State<MyApp> {
         final role = response['role'] as String;
         userRole.value = role;
         if (role == 'mechanic') {
-          _listenForNewServiceRequests();
+          // --- Pass the userId to the listener ---
+          _listenForNewServiceRequests(userId);
         } else {
           _stopListeningForRequests();
         }
@@ -162,16 +160,27 @@ class _MyAppState extends State<MyApp> {
     }
   }
 
-  void _listenForNewServiceRequests() {
+  // --- FIX IS HERE: Bypassed the analyzer bug by filtering inside the listener ---
+  void _listenForNewServiceRequests(String userId) {
     _requestStreamSubscription?.cancel();
     _requestStreamSubscription = supabase
         .from('service_requests')
-        .stream(primaryKey: ['id'])
-        .eq('status', 'pending')
+        .stream(primaryKey: ['id']) // 1. Listen to the whole table
         .listen((data) {
-      if (data.isNotEmpty) {
-        debugPrint("New service request detected!");
+      
+      // 2. Filter the results *inside* the app
+      // This achieves the same goal as .eq().eq() or .match()
+      final myPendingRequests = data.where((req) => 
+          req['status'] == 'pending' && 
+          req['mechanic_id'] == userId
+      ).toList();
+
+      // 3. Show notifier only if there are matching requests
+      if (myPendingRequests.isNotEmpty) {
+        debugPrint("New service request detected for this mechanic!");
         requestNotifier.show();
+      } else {
+        requestNotifier.hide();
       }
     }, onError: (error) {
       debugPrint("Error listening to service requests: $error");
@@ -226,7 +235,6 @@ class NavigationDrawer extends StatelessWidget {
     final user = supabase.auth.currentUser;
     final bool isLoggedIn = user != null;
 
-    // CHANGED: The Drawer now listens to both role and profile notifiers
     return ValueListenableBuilder<String?>(
       valueListenable: userRole,
       builder: (context, currentRole, child) {
@@ -238,40 +246,64 @@ class NavigationDrawer extends StatelessWidget {
                 padding: EdgeInsets.zero,
                 children: <Widget>[
                   DrawerHeader(
-                    decoration: const BoxDecoration(
-                      color: Color.fromARGB(233, 214, 251, 250),
+                    decoration: BoxDecoration(
+                      image: DecorationImage(
+                        image: const AssetImage('assets/drawer_background.png'), 
+                        fit: BoxFit.cover,
+                        colorFilter: ColorFilter.mode(
+                          Colors.black.withOpacity(0.4),
+                          BlendMode.darken,
+                        ),
+                      ),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
-                        // NEW: Display user avatar
                         CircleAvatar(
                           radius: 30,
                           backgroundColor: Colors.white,
-                          backgroundImage: (profile?.avatarUrl != null && profile!.avatarUrl!.isNotEmpty)
+                          backgroundImage: (profile?.avatarUrl != null &&
+                                  profile!.avatarUrl!.isNotEmpty)
                               ? NetworkImage(profile.avatarUrl!)
                               : null,
-                          child: (profile?.avatarUrl == null || profile!.avatarUrl!.isEmpty)
-                              ? const Icon(Icons.person, size: 40, color: Colors.blue)
+                          child: (profile?.avatarUrl == null ||
+                                  profile!.avatarUrl!.isEmpty)
+                              ? const Icon(Icons.person,
+                                  size: 40, color: Colors.blue)
                               : null,
                         ),
                         const SizedBox(height: 8),
-                        // NEW: Display user's full name, fallback to email
                         Text(
-                          isLoggedIn ? (profile?.fullName ?? user.email ?? 'User') : 'Guest User',
+                          isLoggedIn
+                              ? (profile?.fullName ?? user.email ?? 'User')
+                              : 'Guest User',
                           style: const TextStyle(
-                            color: Colors.blue,
+                            color: Colors.white,
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
+                            shadows: <Shadow>[
+                              Shadow(
+                                offset: Offset(1.0, 1.0),
+                                blurRadius: 3.0,
+                                color: Color.fromARGB(255, 0, 0, 0),
+                              ),
+                            ],
                           ),
                         ),
                         if (isLoggedIn)
                           Text(
                             'ID: ${user.id.substring(0, 8)}...',
                             style: const TextStyle(
-                              color: Colors.blueGrey,
+                              color: Colors.white70,
                               fontSize: 12,
+                              shadows: <Shadow>[
+                                Shadow(
+                                  offset: Offset(1.0, 1.0),
+                                  blurRadius: 3.0,
+                                  color: Color.fromARGB(255, 0, 0, 0),
+                                ),
+                              ],
                             ),
                           ),
                       ],
@@ -371,6 +403,7 @@ class NavigationDrawer extends StatelessWidget {
                     title: const Text('Settings'),
                     onTap: () {
                       Navigator.pop(context);
+      
                       Navigator.pushReplacementNamed(context, '/settings');
                     },
                   ),
@@ -451,3 +484,4 @@ class NavigationDrawer extends StatelessWidget {
     );
   }
 }
+

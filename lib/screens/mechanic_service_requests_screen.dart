@@ -3,7 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:autofix/main.dart'; // For supabase client and snackbarKey
 import 'package:latlong2/latlong.dart';
 import 'dart:async';
-import 'package:geolocator/geolocator.dart'; // Import geolocator for GPS
+import 'package:geolocator/geolocator.dart';
 import 'package:autofix/screens/chat_list_screen.dart';
 import 'package:autofix/screens/account_screen.dart';
 import 'package:autofix/main.dart' as app_nav;
@@ -11,19 +11,15 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
-// --- HELPER WIDGETS FOR DIALOGS TO FIX CONTROLLER ERROR ---
-
-/// Manages the state for the ETA input dialog's content.
+// --- HELPER WIDGETS (Unchanged) ---
 class _EtaInputDialogContent extends StatefulWidget {
   const _EtaInputDialogContent();
-
   @override
   _EtaInputDialogContentState createState() => _EtaInputDialogContentState();
 }
 
 class _EtaInputDialogContentState extends State<_EtaInputDialogContent> {
   late final TextEditingController _etaController;
-
   @override
   void initState() {
     super.initState();
@@ -68,10 +64,8 @@ class _EtaInputDialogContentState extends State<_EtaInputDialogContent> {
   }
 }
 
-/// Manages the state for the Price input dialog's content.
 class _PriceInputDialogContent extends StatefulWidget {
   const _PriceInputDialogContent();
-
   @override
   _PriceInputDialogContentState createState() =>
       _PriceInputDialogContentState();
@@ -79,7 +73,6 @@ class _PriceInputDialogContent extends StatefulWidget {
 
 class _PriceInputDialogContentState extends State<_PriceInputDialogContent> {
   late final TextEditingController _priceController;
-
   @override
   void initState() {
     super.initState();
@@ -124,10 +117,8 @@ class _PriceInputDialogContentState extends State<_PriceInputDialogContent> {
     );
   }
 }
+// --- END HELPER WIDGETS ---
 
-
-/// A screen for mechanics to view and manage service requests.
-/// It displays pending requests and requests they have accepted in separate tabs.
 class MechanicServiceRequestsScreen extends StatefulWidget {
   const MechanicServiceRequestsScreen({super.key});
 
@@ -139,7 +130,7 @@ class MechanicServiceRequestsScreen extends StatefulWidget {
 class _MechanicServiceRequestsScreenState
     extends State<MechanicServiceRequestsScreen>
     with SingleTickerProviderStateMixin {
-  late final Future<void> _initializeFuture;
+  late Future<void> _initializeFuture;
   String? _currentMechanicId;
   String? _mechanicFullName;
   Stream<List<Map<String, dynamic>>>? _pendingRequestsStream;
@@ -199,6 +190,17 @@ class _MechanicServiceRequestsScreenState
     _initializeStreams();
   }
 
+  /// NEW: A central refresh function for pull-to-refresh and the FAB.
+  Future<void> _refreshData() async {
+    snackbarKey.currentState
+        ?.showSnackBar(const SnackBar(content: Text('Refreshing data...'), duration: Duration(seconds: 1),));
+    // This will re-fetch mechanic location and re-initialize the streams
+    await _initializeMechanic();
+    if (mounted) {
+      setState(() {}); // This ensures the FutureBuilder rebuilds
+    }
+  }
+
   /// Gets the phone's current GPS location and updates Supabase.
   Future<LatLng?> _updateAndGetLiveLocation() async {
     if (!mounted) return null;
@@ -230,7 +232,6 @@ class _MechanicServiceRequestsScreenState
           'last_seen': DateTime.now().toIso8601String(),
         }).eq('user_id', _currentMechanicId!);
       }
-
       return currentLocation;
     } catch (e) {
       if (mounted) {
@@ -238,7 +239,7 @@ class _MechanicServiceRequestsScreenState
             content: Text('Location Error: ${e.toString()}'),
             backgroundColor: Colors.red));
       }
-      return _mechanicLocation; // Return old location on error
+      return _mechanicLocation;
     } finally {
       if (mounted) {
         setState(() => _isUpdatingLocation = false);
@@ -248,16 +249,17 @@ class _MechanicServiceRequestsScreenState
 
   /// Sets up the real-time streams for pending and accepted requests.
   void _initializeStreams() {
-    // This stream fetches all changes from the 'service_requests' table.
     final serviceRequestsStream =
         supabase.from('service_requests').stream(primaryKey: ['id']);
 
-    // This stream takes the raw data, then filters and sorts it in the app.
+    // --- LOGIC FIX IS HERE ---
     _pendingRequestsStream = serviceRequestsStream.map((requests) {
-      // Filter for 'pending' requests.
-      final pending =
-          requests.where((req) => req['status'] == 'pending').toList();
-      // Sort by creation date, newest first.
+      // Filter for 'pending' requests AND requests assigned to THIS mechanic.
+      final pending = requests.where((req) => 
+        req['status'] == 'pending' &&
+        req['mechanic_id'] == _currentMechanicId // This is the crucial fix
+      ).toList();
+      
       pending.sort((a, b) {
         final dateA = DateTime.parse(a['created_at']);
         final dateB = DateTime.parse(b['created_at']);
@@ -266,15 +268,12 @@ class _MechanicServiceRequestsScreenState
       return pending;
     }).asyncMap(_fetchProfilesForRequests);
 
-    // This stream does the same for the mechanic's accepted requests.
     _acceptedRequestsStream = serviceRequestsStream.map((requests) {
-      // Filter for requests accepted by the current mechanic.
       final accepted = requests
           .where((req) =>
               req['mechanic_id'] == _currentMechanicId &&
               req['status'] == 'accepted')
           .toList();
-      // Sort by acceptance date, newest first.
       accepted.sort((a, b) {
         final dateA =
             a['accepted_at'] != null ? DateTime.parse(a['accepted_at']) : DateTime(1970);
@@ -386,19 +385,15 @@ class _MechanicServiceRequestsScreenState
             'Mark this request as completed for ₱${price.toStringAsFixed(2)}?');
     if (!confirm || !mounted) return;
     
-    // The request ID is a UUID String, not an integer. No need to parse it.
     final requestId = request['id'] as String;
     await _updateDatabaseAfterCompletion(price, requestId);
   }
 
   Future<void> _updateDatabaseAfterCompletion(
-      double price, String requestId) async { // The ID parameter is now a String.
+      double price, String requestId) async {
     if (!mounted) return;
-
     try {
       await supabase.from('service_requests').update({
-        // Change status to 'awaiting_payment'.
-        // This allows the customer's app to show a "Pay Now" button.
         'status': 'awaiting_payment',
         'final_price': price,
         'completed_at': DateTime.now().toIso8601String(),
@@ -422,13 +417,11 @@ class _MechanicServiceRequestsScreenState
           const SnackBar(content: Text('Your location is not available.')));
       return;
     }
-
     try {
       final locationString = await supabase.rpc(
         'get_request_location_as_text',
         params: {'request_id_input': request['id']},
       ) as String;
-
       final parts =
           locationString.substring(6, locationString.length - 1).split(' ');
       final lon = double.parse(parts[0]);
@@ -512,12 +505,12 @@ class _MechanicServiceRequestsScreenState
             actions: [
               IconButton(
                   icon: const Icon(Icons.message),
-                  onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const ChatListScreen()))),
+                  onPressed: () => Navigator.of(context)
+                      .push(MaterialPageRoute(builder: (_) => const ChatListScreen()))),
               IconButton(
                   icon: const Icon(Icons.person),
-                  onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const AccountScreen()))),
+                  onPressed: () => Navigator.of(context)
+                      .push(MaterialPageRoute(builder: (_) => const AccountScreen()))),
             ],
           ),
           drawer: const app_nav.NavigationDrawer(),
@@ -525,42 +518,31 @@ class _MechanicServiceRequestsScreenState
             controller: _tabController,
             children: [
               _PendingRequestsList(
-                  stream: _pendingRequestsStream!,
-                  onAccept: _acceptRequest,
-                  onCancel: _cancelRequest),
+                stream: _pendingRequestsStream!,
+                onAccept: _acceptRequest,
+                onCancel: _cancelRequest,
+                onViewOnMap: _navigateToMapView,
+                onRefresh: _refreshData,
+              ),
               _AcceptedRequestsList(
                 stream: _acceptedRequestsStream!,
                 onCancel: _cancelRequest,
                 onComplete: _completeServiceRequest,
                 onViewOnMap: _navigateToMapView,
+                onRefresh: _refreshData,
               ),
             ],
           ),
           floatingActionButton: FloatingActionButton.extended(
-            onPressed: _isUpdatingLocation
-                ? null
-                : () async {
-                    snackbarKey.currentState?.showSnackBar(
-                        const SnackBar(content: Text('Updating your location...')));
-                    final newLocation = await _updateAndGetLiveLocation();
-                    if (mounted && newLocation != null) {
-                      setState(() {
-                        _mechanicLocation = newLocation;
-                      });
-                      snackbarKey.currentState?.showSnackBar(const SnackBar(
-                        content: Text('Location updated successfully!'),
-                        backgroundColor: Colors.green,
-                      ));
-                    }
-                  },
-            label: const Text('Refresh Location'),
+            onPressed: _isUpdatingLocation ? null : _refreshData,
+            label: const Text('Refresh'),
             icon: _isUpdatingLocation
                 ? const SizedBox(
                     width: 20,
                     height: 20,
                     child: CircularProgressIndicator(
                         color: Colors.white, strokeWidth: 2.0))
-                : const Icon(Icons.location_searching),
+                : const Icon(Icons.refresh),
           ),
         );
       },
@@ -571,34 +553,55 @@ class _MechanicServiceRequestsScreenState
 // --- UI Sub-Widgets ---
 
 class _PendingRequestsList extends StatelessWidget {
-  const _PendingRequestsList(
-      {required this.stream, required this.onAccept, required this.onCancel});
+  const _PendingRequestsList({
+    required this.stream,
+    required this.onAccept,
+    required this.onCancel,
+    required this.onViewOnMap,
+    required this.onRefresh,
+  });
   final Stream<List<Map<String, dynamic>>> stream;
   final Function(Map<String, dynamic>) onAccept;
   final Function(Map<String, dynamic>) onCancel;
+  final Function(Map<String, dynamic>) onViewOnMap;
+  final Future<void> Function() onRefresh;
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<List<Map<String, dynamic>>>(
       stream: stream,
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
+        if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.hasError) {
           return Center(child: Text('Error: ${snapshot.error}'));
         }
-        final requests = snapshot.data!;
+        final requests = snapshot.data ?? [];
         if (requests.isEmpty) {
-          return const Center(child: Text('No pending service requests.'));
+          return RefreshIndicator(
+            onRefresh: onRefresh,
+            child: ListView( 
+              physics: const AlwaysScrollableScrollPhysics(),
+              children: [
+                SizedBox(height: MediaQuery.of(context).size.height / 3),
+                const Center(child: Text('No pending service requests.\nPull down to refresh.')),
+              ],
+            ),
+          );
         }
-        return ListView.builder(
-          itemCount: requests.length,
-          itemBuilder: (context, index) => _RequestCard(
-            request: requests[index],
-            isPending: true,
-            onAccept: onAccept,
-            onCancel: onCancel,
+        return RefreshIndicator(
+          onRefresh: onRefresh,
+          child: ListView.builder(
+            physics: const AlwaysScrollableScrollPhysics(),
+            itemCount: requests.length,
+            itemBuilder: (context, index) => _RequestCard(
+              request: requests[index],
+              isPending: true,
+              onAccept: onAccept,
+              onCancel: onCancel,
+              onViewOnMap: onViewOnMap,
+            ),
           ),
         );
       },
@@ -612,37 +615,51 @@ class _AcceptedRequestsList extends StatelessWidget {
     required this.onCancel,
     required this.onComplete,
     required this.onViewOnMap,
+    required this.onRefresh,
   });
 
   final Stream<List<Map<String, dynamic>>> stream;
   final Function(Map<String, dynamic>) onCancel;
   final Function(Map<String, dynamic>) onComplete;
   final Function(Map<String, dynamic>) onViewOnMap;
+  final Future<void> Function() onRefresh;
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<List<Map<String, dynamic>>>(
       stream: stream,
       builder: (context, snapshot) {
-        if (!snapshot.hasData) {
+        if (snapshot.connectionState == ConnectionState.waiting && !snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
         if (snapshot.hasError) {
           return Center(child: Text('Error: ${snapshot.error}'));
         }
-        final requests = snapshot.data!;
+        final requests = snapshot.data ?? [];
         if (requests.isEmpty) {
-          return const Center(child: Text('You have no active service requests.'));
+          return RefreshIndicator(
+            onRefresh: onRefresh,
+            child: ListView( 
+              physics: const AlwaysScrollableScrollPhysics(),
+              children: [
+                SizedBox(height: MediaQuery.of(context).size.height / 3),
+                const Center(child: Text('You have no active service requests.\nPull down to refresh.')),
+              ],
+            ),
+          );
         }
-
-        return ListView.builder(
-          itemCount: requests.length,
-          itemBuilder: (context, index) => _RequestCard(
-            request: requests[index],
-            isPending: false,
-            onCancel: onCancel,
-            onComplete: onComplete,
-            onViewOnMap: onViewOnMap,
+        return RefreshIndicator(
+          onRefresh: onRefresh,
+          child: ListView.builder(
+            physics: const AlwaysScrollableScrollPhysics(),
+            itemCount: requests.length,
+            itemBuilder: (context, index) => _RequestCard(
+              request: requests[index],
+              isPending: false,
+              onCancel: onCancel,
+              onComplete: onComplete,
+              onViewOnMap: onViewOnMap,
+            ),
           ),
         );
       },
@@ -669,7 +686,8 @@ class _RequestCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final requesterName = request['profiles']?['full_name'] ?? 'Unknown Owner';
+    final requesterName =
+        request['profiles']?['full_name'] ?? 'Unknown Owner';
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
@@ -694,44 +712,67 @@ class _RequestCard extends StatelessWidget {
               Text(
                   'Accepted At: ${DateTime.parse(request['accepted_at']).toLocal().toString().substring(0, 16)}'),
             ],
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             if (isPending)
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+              // --- UI FIX IS HERE ---
+              // Replaced Row with Wrap to prevent overflow
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 8.0, // Horizontal space between buttons
+                runSpacing: 4.0, // Vertical space if buttons wrap
                 children: [
-                  TextButton(
+                  // Kept the Cancel button
+                  TextButton.icon(
                     onPressed: () => onCancel?.call(request),
-                    child: const Text('Cancel Request',
-                        style: TextStyle(color: Colors.red)),
+                    icon: const Icon(Icons.close),
+                    label: const Text('Cancel'),
+                    style: TextButton.styleFrom(foregroundColor: Colors.grey[700]),
                   ),
-                  const SizedBox(width: 8),
+                  // Added the View Map button
+                  OutlinedButton.icon(
+                    onPressed: () => onViewOnMap?.call(request),
+                    icon: const Icon(Icons.map_outlined),
+                    label: const Text('Map'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Theme.of(context).primaryColor,
+                      side: BorderSide(color: Theme.of(context).primaryColor),
+                    ),
+                  ),
                   ElevatedButton.icon(
                     onPressed: () => onAccept?.call(request),
-                    icon: const Icon(Icons.check),
-                    label: const Text('Accept Request'),
+                    icon: const Icon(Icons.check_circle_outline),
+                    label: const Text('Accept'),
                   ),
                 ],
               )
             else if (request['status'] == 'accepted')
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
                   Expanded(
-                      child: ElevatedButton.icon(
-                          onPressed: () => onCancel?.call(request),
-                          icon: const Icon(Icons.cancel),
-                          label: const Text('Cancel'))),
+                    child: TextButton.icon(
+                      onPressed: () => onCancel?.call(request),
+                      icon: const Icon(Icons.cancel),
+                      label: const Text('Cancel'),
+                      style: TextButton.styleFrom(foregroundColor: Colors.red),
+                    ),
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
-                      child: ElevatedButton.icon(
-                          onPressed: () => onComplete?.call(request),
-                          icon: const Icon(Icons.done_all),
-                          label: const Text('Done'))),
+                    child: ElevatedButton.icon(
+                      onPressed: () => onComplete?.call(request),
+                      icon: const Icon(Icons.done_all),
+                      label: const Text('Done'),
+                    ),
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
-                      child: ElevatedButton.icon(
-                          onPressed: () => onViewOnMap?.call(request),
-                          icon: const Icon(Icons.map),
-                          label: const Text('Map'))),
+                    child: TextButton.icon(
+                      onPressed: () => onViewOnMap?.call(request),
+                      icon: const Icon(Icons.navigation_outlined),
+                      label: const Text('Navigate'), // Changed text to "Navigate"
+                    ),
+                  ),
                 ],
               ),
           ],
@@ -741,8 +782,7 @@ class _RequestCard extends StatelessWidget {
   }
 }
 
-// --- NEW MECHANIC MAP SCREEN WIDGET ---
-
+// --- MechanicMapScreen (Unchanged) ---
 class MechanicMapScreen extends StatefulWidget {
   final LatLng initialMechanicLocation;
   final LatLng requesterLocation;
@@ -756,7 +796,6 @@ class MechanicMapScreen extends StatefulWidget {
   @override
   State<MechanicMapScreen> createState() => _MechanicMapScreenState();
 }
-
 class _MechanicMapScreenState extends State<MechanicMapScreen> {
   final MapController _mapController = MapController();
   late LatLng _currentMechanicLocation;
