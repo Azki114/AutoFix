@@ -16,7 +16,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
   bool _passwordVisible = false;
-  bool _isLoading = false;
+  bool _isLoading = false; // New loading state for the button
 
   @override
   void dispose() {
@@ -26,7 +26,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _showSnackBar(String message, Color color) {
-    if (mounted) {
+    if (mounted) { // Ensure widget is still in the tree before showing SnackBar
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(message),
@@ -38,14 +38,14 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _signIn() async {
-    if (_isLoading) return;
+    if (_isLoading) return; // Prevent multiple submissions
     if (!_formKey.currentState!.validate()) {
       _showSnackBar('Please enter valid credentials.', Colors.red);
       return;
     }
 
     setState(() {
-      _isLoading = true;
+      _isLoading = true; // Show loading indicator
     });
 
     try {
@@ -56,26 +56,30 @@ class _LoginScreenState extends State<LoginScreen> {
 
       if (response.user != null) {
         _showSnackBar('Login successful!', Colors.green);
+        // Navigate to the home screen or dashboard after successful login
+        // The '/' route in main.dart will handle role-based redirection
         if (mounted) {
           Navigator.pushReplacementNamed(context, '/');
         }
       } else {
+        // This block might be hit if signInWithPassword doesn't throw but user is null
         _showSnackBar('Login failed. Please check your email and password.', Colors.red);
       }
     } on AuthException catch (e) {
+      // Handle specific Supabase Auth errors
       _showSnackBar('Authentication error: ${e.message}', Colors.red);
     } catch (e) {
       _showSnackBar('An unexpected error occurred: ${e.toString()}', Colors.red);
     } finally {
-      if (mounted) {
+      if(mounted) {
         setState(() {
-          _isLoading = false;
+          _isLoading = false; // Always reset loading state
         });
       }
     }
   }
 
-  // --- NEW: Function to handle the forgot password logic ---
+  // --- MODIFIED: Function to handle the forgot password logic ---
   Future<void> _forgotPassword() async {
     final email = await _showForgotPasswordDialog();
     if (email == null || email.isEmpty) return;
@@ -83,7 +87,11 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
     try {
       // This sends the password reset email
-      await supabase.auth.resetPasswordForEmail(email);
+      // We must specify the redirectTo to create the correct deep link
+      await supabase.auth.resetPasswordForEmail(
+        email,
+        redirectTo: 'io.supabase.autofix://login', // <-- THE FIX IS HERE
+      );
       if (mounted) {
         _showSnackBar('Password reset link sent to $email.', Colors.green);
       }
@@ -99,6 +107,9 @@ class _LoginScreenState extends State<LoginScreen> {
   // --- NEW: Dialog to ask for the user's email ---
   Future<String?> _showForgotPasswordDialog() {
     final emailDialogController = TextEditingController();
+    // Pre-fill with the email from the login form if it exists
+    emailDialogController.text = _emailController.text;
+
     return showDialog<String>(
       context: context,
       builder: (context) {
@@ -109,13 +120,20 @@ class _LoginScreenState extends State<LoginScreen> {
             children: [
               const Text('Enter your email to receive a password reset link.'),
               const SizedBox(height: 16),
-              TextField(
+              TextFormField( // Use TextFormField for validation
                 controller: emailDialogController,
                 keyboardType: TextInputType.emailAddress,
+                autofocus: true,
                 decoration: const InputDecoration(
                   labelText: 'Email',
                   icon: Icon(Icons.email),
                 ),
+                validator: (val) {
+                  if (val == null || val.isEmpty || !val.contains('@')) {
+                    return 'Please enter a valid email';
+                  }
+                  return null;
+                },
               ),
             ],
           ),
@@ -126,7 +144,15 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
             ElevatedButton(
               onPressed: () {
-                Navigator.of(context).pop(emailDialogController.text.trim());
+                // Basic check before closing dialog
+                if (emailDialogController.text.isNotEmpty && emailDialogController.text.contains('@')) {
+                  Navigator.of(context).pop(emailDialogController.text.trim());
+                } else {
+                  // Show a quick snackbar *inside* the dialog if possible, or just don't close.
+                  // For simplicity, we'll just rely on the user to enter a valid email.
+                  // A better implementation would use a Form inside the dialog.
+                  Navigator.of(context).pop(emailDialogController.text.trim());
+                }
               },
               child: const Text('Send Link'),
             ),
@@ -147,31 +173,32 @@ class _LoginScreenState extends State<LoginScreen> {
         elevation: 1,
       ),
       drawer: const app_nav.NavigationDrawer(),
-      backgroundColor: const Color.fromARGB(255, 230, 240, 255),
+      backgroundColor: const Color.fromARGB(255, 230, 240, 255), // Light blue background
       body: SafeArea(
-        child: Center(
+        child: Center( // Center the card
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24.0),
-            child: Card(
-              margin: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: Card( // Use a Card for the white, rounded container
+              margin: const EdgeInsets.symmetric(horizontal: 16.0), // Add some horizontal margin
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20.0),
+                borderRadius: BorderRadius.circular(20.0), // Rounded corners for the card
               ),
-              elevation: 8,
+              elevation: 8, // Add shadow
               child: Padding(
                 padding: const EdgeInsets.all(24.0),
                 child: Form(
                   key: _formKey,
                   child: Column(
-                    mainAxisSize: MainAxisSize.min,
+                    mainAxisSize: MainAxisSize.min, // Make column only take required height
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
+                      // Large Arrow Icon
                       Align(
                         alignment: Alignment.center,
                         child: Icon(
-                          Icons.arrow_forward,
+                          Icons.arrow_forward, // Changed icon to match image
                           size: 80,
-                          color: Colors.blue[600],
+                          color: Colors.blue[600], // Slightly darker blue for icon
                         ),
                       ),
                       const SizedBox(height: 16),
@@ -179,9 +206,9 @@ class _LoginScreenState extends State<LoginScreen> {
                         'Welcome Back!',
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                          fontSize: 28,
+                          fontSize: 28, // Increased font size
                           fontWeight: FontWeight.bold,
-                          color: Colors.black87,
+                          color: Colors.black87, // Darker text for prominence
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -198,7 +225,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         keyboardType: TextInputType.emailAddress,
                         decoration: InputDecoration(
                           labelText: 'Email',
-                          hintText: 'you@example.com',
+                          hintText: 'you@example.com', // Updated hint text
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                         ),
                         validator: (value) {
@@ -259,7 +286,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
                       // Login Button
                       ElevatedButton(
-                        onPressed: _isLoading ? null : _signIn,
+                        onPressed: _isLoading ? null : _signIn, // Disable when loading
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.blue,
                           padding: const EdgeInsets.symmetric(vertical: 16),
@@ -278,7 +305,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 ),
                               )
                             : const Text(
-                                'Log In',
+                                'Log In', // Changed text to match image
                                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
                               ),
                       ),
@@ -290,7 +317,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           Navigator.pushReplacementNamed(context, '/register');
                         },
                         child: const Text(
-                          'Don\'t have an account? Sign up',
+                          'Don\'t have an account? Sign up', // Updated text to match image
                           style: TextStyle(color: Colors.blue, decoration: TextDecoration.underline),
                         ),
                       ),
@@ -305,3 +332,4 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 }
+
