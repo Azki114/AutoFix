@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
-        android:label="autofix"
+        android:label="AutoFix"
         android:name="${applicationName}"
         android:icon="@mipmap/launcher_icon">
         <activity
@@ -20,10 +20,22 @@
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
               />
+            
+            <!-- This is your original intent filter that launches the app -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+
+            <!-- This filter registers your app to handle the password reset deep link. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <!-- This MUST match the 'redirectTo' URL in your code and Supabase settings -->
+                <data android:scheme="io.supabase.autofix" />
+            </intent-filter>
+
         </activity>
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
@@ -43,3 +55,4 @@
         </intent>
     </queries>
 </manifest>
+

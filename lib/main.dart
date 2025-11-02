@@ -21,8 +21,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:autofix/screens/reset_password_screen.dart'; 
 
-// --- NEW: A simple class to hold user profile data ---
 class UserProfile {
   final String id;
   final String? fullName;
@@ -84,15 +84,27 @@ class _MyAppState extends State<MyApp> {
   @override
   void initState() {
     super.initState();
+    
+    // --- 3. MODIFY THE AUTH LISTENER ---
     _authSubscription = supabase.auth.onAuthStateChange.listen((data) {
       final Session? session = data.session;
-      if (session == null) {
+      final AuthChangeEvent event = data.event; // Get the event type
+
+      if (event == AuthChangeEvent.passwordRecovery) {
+        // This is the magic!
+        // If the app opens from a password reset link,
+        // immediately navigate to the reset screen.
+        navigatorKey.currentState
+            ?.pushNamedAndRemoveUntil('/reset-password', (route) => false);
+      } else if (session == null) {
+        // This is the normal logout flow
         userRole.value = null;
-        userProfileNotifier.value = null; // NEW: Clear profile on logout
+        userProfileNotifier.value = null; 
         _stopListeningForRequests();
         navigatorKey.currentState
             ?.pushNamedAndRemoveUntil('/login', (route) => false);
       } else {
+        // This is the normal login/startup flow
         _fetchUserData(session.user.id);
       }
     });
@@ -105,6 +117,7 @@ class _MyAppState extends State<MyApp> {
     super.dispose();
   }
 
+  // CHANGED: This function now fetches role, name, and avatar
   Future<void> _fetchUserData(String? userId) async {
     if (userId == null) {
       userRole.value = null;
@@ -119,6 +132,7 @@ class _MyAppState extends State<MyApp> {
           .eq('id', userId)
           .single();
 
+      // NEW: Update the global user profile notifier
       userProfileNotifier.value = UserProfile(
         id: userId,
         fullName: response['full_name'],
@@ -169,7 +183,6 @@ class _MyAppState extends State<MyApp> {
         .listen((data) {
       
       // 2. Filter the results *inside* the app
-      // This achieves the same goal as .eq().eq() or .match()
       final myPendingRequests = data.where((req) => 
           req['status'] == 'pending' && 
           req['mechanic_id'] == userId
@@ -205,6 +218,7 @@ class _MyAppState extends State<MyApp> {
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
       initialRoute: '/',
+      // --- 2. ADD THE NEW ROUTE ---
       routes: {
         '/': (context) => const SplashScreen(),
         '/splash': (context) => const SplashScreen(),
@@ -222,6 +236,7 @@ class _MyAppState extends State<MyApp> {
         '/mechanic_service_requests': (context) =>
             const MechanicServiceRequestsScreen(),
         '/service_history': (context) => const ServiceHistoryScreen(),
+        '/reset-password': (context) => const ResetPasswordScreen(), // <-- ADD THIS
       },
     );
   }
