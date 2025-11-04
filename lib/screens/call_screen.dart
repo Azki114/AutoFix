@@ -37,9 +37,9 @@ class CallScreen extends StatelessWidget {
       userName: userName,
       callID: callID,
       
-      // Use the default one-on-one voice call config (this API version doesn't expose an `onHangUp` named parameter).
+      // Use the default one-on-one voice call config (this API version doesn't expose an `onHangUp` named parameter)..
       config: ZegoUIKitPrebuiltCallConfig.oneOnOneVoiceCall(),
-    );
+    ); 
   }
 }
 
