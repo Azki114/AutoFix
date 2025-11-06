@@ -22,6 +22,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:autofix/screens/reset_password_screen.dart'; 
+import 'package:autofix/screens/pending_verification_screen.dart';
 
 class UserProfile {
   final String id;
@@ -39,7 +40,6 @@ final RequestNotifier requestNotifier = RequestNotifier();
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 final ValueNotifier<String?> userRole = ValueNotifier<String?>(null);
 
-// --- NEW: Global ValueNotifier for the user profile ---
 final ValueNotifier<UserProfile?> userProfileNotifier =
     ValueNotifier<UserProfile?>(null);
 
@@ -85,26 +85,31 @@ class _MyAppState extends State<MyApp> {
   void initState() {
     super.initState();
     
-    // --- 3. MODIFY THE AUTH LISTENER ---
     _authSubscription = supabase.auth.onAuthStateChange.listen((data) {
       final Session? session = data.session;
-      final AuthChangeEvent event = data.event; // Get the event type
+      final AuthChangeEvent event = data.event; 
 
       if (event == AuthChangeEvent.passwordRecovery) {
-        // This is the magic!
-        // If the app opens from a password reset link,
-        // immediately navigate to the reset screen.
         navigatorKey.currentState
             ?.pushNamedAndRemoveUntil('/reset-password', (route) => false);
       } else if (session == null) {
-        // This is the normal logout flow
         userRole.value = null;
         userProfileNotifier.value = null; 
         _stopListeningForRequests();
         navigatorKey.currentState
             ?.pushNamedAndRemoveUntil('/login', (route) => false);
-      } else {
-        // This is the normal login/startup flow
+      } else if (event == AuthChangeEvent.signedIn) {
+        // --- THIS IS THE FIX (PART 1) ---
+        // This is a new sign-up OR login.
+        // Add a small delay to win the race condition against the register screen.
+        Future.delayed(const Duration(milliseconds: 1000), () {
+          // Check if user is still logged in after the delay, just in case
+          if (supabase.auth.currentUser != null) {
+            _fetchUserData(session.user.id);
+          }
+        });
+      } else if (event == AuthChangeEvent.initialSession) {
+         // App is starting, user is already logged in. No delay needed.
         _fetchUserData(session.user.id);
       }
     });
@@ -117,7 +122,6 @@ class _MyAppState extends State<MyApp> {
     super.dispose();
   }
 
-  // CHANGED: This function now fetches role, name, and avatar
   Future<void> _fetchUserData(String? userId) async {
     if (userId == null) {
       userRole.value = null;
@@ -126,28 +130,61 @@ class _MyAppState extends State<MyApp> {
       return;
     }
     try {
+      // --- THIS IS THE FIX (PART 2) ---
+      // Change .single() to .maybeSingle() to prevent "0 rows" crash.
       final response = await supabase
           .from('profiles')
-          .select('role, full_name, avatar_url')
+          .select('role, full_name, avatar_url, is_verified')
           .eq('id', userId)
-          .single();
+          .maybeSingle(); // <-- THE FIX
 
-      // NEW: Update the global user profile notifier
+      // --- THIS IS THE FIX (PART 3) ---
+      // Handle the case where the profile doesn't exist yet
+      if (response == null) {
+        // This means the profile is still being created (the 1-sec delay wasn't enough).
+        // Log them out and ask them to log in again.
+        await supabase.auth.signOut();
+        navigatorKey.currentState?.pushNamedAndRemoveUntil('/login', (route) => false);
+        snackbarKey.currentState?.showSnackBar(
+          const SnackBar(
+            content: Text('Registration is processing. Please log in.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return; // Stop here.
+      }
+      
       userProfileNotifier.value = UserProfile(
         id: userId,
         fullName: response['full_name'],
         avatarUrl: response['avatar_url'],
       );
 
+      final bool isVerified = response['is_verified'] ?? false;
+      
+      if (!isVerified) {
+        // User is logged in BUT NOT VERIFIED. Send them to the "Holding Room".
+        navigatorKey.currentState?.pushNamedAndRemoveUntil('/pending-verification', (route) => false);
+        return; // Stop here. Do not proceed.
+      }
+      
       if (response['role'] != null) {
         final role = response['role'] as String;
         userRole.value = role;
         if (role == 'mechanic') {
-          // --- Pass the userId to the listener ---
           _listenForNewServiceRequests(userId);
         } else {
           _stopListeningForRequests();
         }
+
+        if (role == 'driver') {
+          navigatorKey.currentState?.pushNamedAndRemoveUntil('/vehicle_owner_map', (route) => false);
+        } else if (role == 'mechanic') {
+          navigatorKey.currentState?.pushNamedAndRemoveUntil('/mechanic_dashboard', (route) => false);
+        } else {
+          navigatorKey.currentState?.pushNamedAndRemoveUntil('/login', (route) => false);
+        }
+
       } else {
         userRole.value = null;
         _stopListeningForRequests();
@@ -164,9 +201,10 @@ class _MyAppState extends State<MyApp> {
       userProfileNotifier.value = null;
       _stopListeningForRequests();
       if (mounted) {
+        navigatorKey.currentState?.pushNamedAndRemoveUntil('/login', (route) => false);
         snackbarKey.currentState?.showSnackBar(
           SnackBar(
-            content: Text('An error occurred loading user data: ${e.toString()}.'),
+            content: Text('Error loading profile: ${e.toString()}.'),
             backgroundColor: Colors.red,
           ),
         );
@@ -174,21 +212,18 @@ class _MyAppState extends State<MyApp> {
     }
   }
 
-  // --- FIX IS HERE: Bypassed the analyzer bug by filtering inside the listener ---
   void _listenForNewServiceRequests(String userId) {
     _requestStreamSubscription?.cancel();
     _requestStreamSubscription = supabase
         .from('service_requests')
-        .stream(primaryKey: ['id']) // 1. Listen to the whole table
+        .stream(primaryKey: ['id']) 
         .listen((data) {
       
-      // 2. Filter the results *inside* the app
       final myPendingRequests = data.where((req) => 
           req['status'] == 'pending' && 
           req['mechanic_id'] == userId
       ).toList();
 
-      // 3. Show notifier only if there are matching requests
       if (myPendingRequests.isNotEmpty) {
         debugPrint("New service request detected for this mechanic!");
         requestNotifier.show();
@@ -218,7 +253,6 @@ class _MyAppState extends State<MyApp> {
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
       initialRoute: '/',
-      // --- 2. ADD THE NEW ROUTE ---
       routes: {
         '/': (context) => const SplashScreen(),
         '/splash': (context) => const SplashScreen(),
@@ -236,7 +270,8 @@ class _MyAppState extends State<MyApp> {
         '/mechanic_service_requests': (context) =>
             const MechanicServiceRequestsScreen(),
         '/service_history': (context) => const ServiceHistoryScreen(),
-        '/reset-password': (context) => const ResetPasswordScreen(), // <-- ADD THIS
+        '/reset-password': (context) => const ResetPasswordScreen(),
+        '/pending-verification': (context) => const PendingVerificationScreen(),
       },
     );
   }
@@ -336,6 +371,7 @@ class NavigationDrawer extends StatelessWidget {
                         Navigator.pushReplacementNamed(
                             context, '/mechanic_dashboard');
                       } else {
+                        // This case handles unverified users
                         Navigator.pushReplacementNamed(context, '/splash');
                       }
                     },
@@ -499,4 +535,3 @@ class NavigationDrawer extends StatelessWidget {
     );
   }
 }
-

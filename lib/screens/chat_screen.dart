@@ -7,6 +7,7 @@ import 'package:video_player/video_player.dart';
 import 'dart:async';
 import 'package:geolocator/geolocator.dart'; // Needed for getting user location for requests
 import 'package:latlong2/latlong.dart'; // Needed for LatLng type
+import 'package:autofix/screens/call_screen.dart'; // --- NEW: Import the call screen ---
 
 class ChatScreen extends StatefulWidget {
   final String chatId;
@@ -395,6 +396,25 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
               ),
             ),
+          
+          // --- NEW: Audio Call Button ---
+          IconButton(
+            icon: const Icon(Icons.call, color: Colors.blue),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => CallScreen(
+                    // Use the chatId as the unique call room ID
+                    callID: widget.chatId,
+                  ),
+                ),
+              );
+            },
+            tooltip: 'Start Audio Call',
+          ),
+          // --- End Call Button ---
+
           IconButton(
             icon: const Icon(Icons.delete_forever, color: Colors.red),
             onPressed: _clearConversation,

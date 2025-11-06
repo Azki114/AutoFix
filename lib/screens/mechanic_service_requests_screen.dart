@@ -10,6 +10,8 @@ import 'package:autofix/main.dart' as app_nav;
 import 'package:flutter_map/flutter_map.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:autofix/screens/call_screen.dart'; // Import the call screen
+import 'package:autofix/screens/chat_screen.dart'; // Import the chat screen
 
 // --- HELPER WIDGETS (Unchanged) ---
 class _EtaInputDialogContent extends StatefulWidget {
@@ -17,7 +19,6 @@ class _EtaInputDialogContent extends StatefulWidget {
   @override
   _EtaInputDialogContentState createState() => _EtaInputDialogContentState();
 }
-
 class _EtaInputDialogContentState extends State<_EtaInputDialogContent> {
   late final TextEditingController _etaController;
   @override
@@ -25,13 +26,11 @@ class _EtaInputDialogContentState extends State<_EtaInputDialogContent> {
     super.initState();
     _etaController = TextEditingController();
   }
-
   @override
   void dispose() {
     _etaController.dispose();
     super.dispose();
   }
-
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -70,7 +69,6 @@ class _PriceInputDialogContent extends StatefulWidget {
   _PriceInputDialogContentState createState() =>
       _PriceInputDialogContentState();
 }
-
 class _PriceInputDialogContentState extends State<_PriceInputDialogContent> {
   late final TextEditingController _priceController;
   @override
@@ -78,13 +76,11 @@ class _PriceInputDialogContentState extends State<_PriceInputDialogContent> {
     super.initState();
     _priceController = TextEditingController();
   }
-
   @override
   void dispose() {
     _priceController.dispose();
     super.dispose();
   }
-
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -155,7 +151,6 @@ class _MechanicServiceRequestsScreenState
     super.dispose();
   }
 
-  /// Fetches initial mechanic data and sets up real-time streams.
   Future<void> _initializeMechanic() async {
     final user = supabase.auth.currentUser;
     if (user == null) {
@@ -190,22 +185,18 @@ class _MechanicServiceRequestsScreenState
     _initializeStreams();
   }
 
-  /// NEW: A central refresh function for pull-to-refresh and the FAB.
   Future<void> _refreshData() async {
     snackbarKey.currentState
         ?.showSnackBar(const SnackBar(content: Text('Refreshing data...'), duration: Duration(seconds: 1),));
-    // This will re-fetch mechanic location and re-initialize the streams
     await _initializeMechanic();
     if (mounted) {
-      setState(() {}); // This ensures the FutureBuilder rebuilds
+      setState(() {});
     }
   }
 
-  /// Gets the phone's current GPS location and updates Supabase.
   Future<LatLng?> _updateAndGetLiveLocation() async {
     if (!mounted) return null;
     setState(() => _isUpdatingLocation = true);
-
     try {
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) throw 'Location services are disabled.';
@@ -247,17 +238,14 @@ class _MechanicServiceRequestsScreenState
     }
   }
 
-  /// Sets up the real-time streams for pending and accepted requests.
   void _initializeStreams() {
     final serviceRequestsStream =
         supabase.from('service_requests').stream(primaryKey: ['id']);
 
-    // --- LOGIC FIX IS HERE ---
     _pendingRequestsStream = serviceRequestsStream.map((requests) {
-      // Filter for 'pending' requests AND requests assigned to THIS mechanic.
       final pending = requests.where((req) => 
         req['status'] == 'pending' &&
-        req['mechanic_id'] == _currentMechanicId // This is the crucial fix
+        req['mechanic_id'] == _currentMechanicId
       ).toList();
       
       pending.sort((a, b) {
@@ -275,10 +263,12 @@ class _MechanicServiceRequestsScreenState
               req['status'] == 'accepted')
           .toList();
       accepted.sort((a, b) {
-        final dateA =
-            a['accepted_at'] != null ? DateTime.parse(a['accepted_at']) : DateTime(1970);
-        final dateB =
-            b['accepted_at'] != null ? DateTime.parse(b['accepted_at']) : DateTime(1970);
+        final dateA = a['accepted_at'] != null
+            ? DateTime.parse(a['accepted_at'])
+            : DateTime(1970);
+        final dateB = b['accepted_at'] != null
+            ? DateTime.parse(b['accepted_at'])
+            : DateTime(1970);
         return dateB.compareTo(dateA);
       });
       return accepted;
@@ -286,7 +276,6 @@ class _MechanicServiceRequestsScreenState
   }
 
 
-  /// Helper function to efficiently fetch profile information for a list of requests.
   Future<List<Map<String, dynamic>>> _fetchProfilesForRequests(
       List<Map<String, dynamic>> requests) async {
     if (requests.isEmpty) return [];
@@ -413,8 +402,7 @@ class _MechanicServiceRequestsScreenState
 
   void _navigateToMapView(Map<String, dynamic> request) async {
     if (_mechanicLocation == null) {
-      snackbarKey.currentState?.showSnackBar(
-          const SnackBar(content: Text('Your location is not available.')));
+      _showSnackBar('Your location is not available.');
       return;
     }
     try {
@@ -437,9 +425,111 @@ class _MechanicServiceRequestsScreenState
         ));
       }
     } catch (e) {
-      snackbarKey.currentState?.showSnackBar(
-          SnackBar(content: Text('Failed to load map data: ${e.toString()}')));
+      _showSnackBar('Failed to load map data: ${e.toString()}');
     }
+  }
+
+  // --- NEW: Function to navigate to the call screen ---
+  void _navigateToCall(Map<String, dynamic> request) {
+    if (_currentMechanicId == null) {
+      _showSnackBar('Cannot initiate call. Mechanic ID is missing.');
+      return;
+    }
+    final requesterId = request['requester_id'] as String?;
+    if (requesterId == null) {
+      _showSnackBar('Cannot initiate call. Requester ID is missing.');
+      return;
+    }
+    
+    // Create a unique, consistent Call ID (which is the Chat ID)
+    final mechanicId = _currentMechanicId!;
+    final callID = (requesterId.compareTo(mechanicId) < 0)
+        ? '${requesterId}_${mechanicId}'
+        : '${mechanicId}_${requesterId}';
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => CallScreen(
+          callID: callID,
+        ),
+      ),
+    );
+  }
+  
+  // --- *** THIS IS THE CORRECTED FUNCTION *** ---
+  Future<void> _navigateToChat(Map<String, dynamic> request) async {
+    if (_currentMechanicId == null) {
+      _showSnackBar('Cannot start chat. Mechanic ID is missing.');
+      return;
+    }
+    // The driver is the requester
+    final driverId = request['requester_id'] as String?;
+    final driverName = request['profiles']?['full_name'] as String?;
+    
+    if (driverId == null || driverName == null) {
+      _showSnackBar('Cannot start chat. Requester (Driver) data is missing.');
+      return;
+    }
+
+    final mechanicId = _currentMechanicId!;
+
+    try {
+      // 1. Check if a chat already exists between these two users
+      // We check for both (mechanic=A, driver=B) OR (mechanic=B, driver=A)
+      // This logic assumes your table has columns 'mechanic_id' and 'driver_id'
+      final response = await supabase
+          .from('chats')
+          .select('id')
+          .or('and(mechanic_id.eq.$mechanicId,driver_id.eq.$driverId),and(mechanic_id.eq.$driverId,driver_id.eq.$mechanicId)')
+          .maybeSingle(); // Use .maybeSingle() to get one row or null
+
+      String chatId;
+
+      if (response != null && response['id'] != null) {
+        // 2. A chat already exists. Use its ID.
+        chatId = response['id'];
+      } else {
+        // 3. No chat exists. Create a new one.
+        // We let Supabase generate the 'id' (UUID) automatically.
+        // We MUST provide both driver_id and mechanic_id to satisfy the NOT NULL constraint.
+        final newChat = await supabase
+            .from('chats')
+            .insert({
+              'mechanic_id': mechanicId,
+              'driver_id': driverId, // Use the correct column name from your error
+              'last_message_content': 'Chat initiated...'
+            })
+            .select('id') // Ask Supabase to return the 'id' of the new row
+            .single();
+        
+        chatId = newChat['id'];
+      }
+
+      // 4. Navigate to the chat screen
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ChatScreen(
+              chatId: chatId,
+              chatPartnerName: driverName, // The chat partner is the driver
+              currentUserId: mechanicId,   // The current user is the mechanic
+              chatPartnerId: driverId,     // The chat partner ID is the driver's ID
+            ),
+          ),
+        );
+      }
+
+    } catch (e) {
+      _showSnackBar('Error initializing chat: ${e.toString()}');
+    }
+  }
+  
+  void _showSnackBar(String message) {
+    snackbarKey.currentState?.showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: Colors.red),
+    );
   }
 
   Future<bool> _showConfirmationDialog(
@@ -523,6 +613,7 @@ class _MechanicServiceRequestsScreenState
                 onCancel: _cancelRequest,
                 onViewOnMap: _navigateToMapView,
                 onRefresh: _refreshData,
+                onChat: _navigateToChat,
               ),
               _AcceptedRequestsList(
                 stream: _acceptedRequestsStream!,
@@ -530,6 +621,8 @@ class _MechanicServiceRequestsScreenState
                 onComplete: _completeServiceRequest,
                 onViewOnMap: _navigateToMapView,
                 onRefresh: _refreshData,
+                onCall: _navigateToCall,
+                onChat: _navigateToChat,
               ),
             ],
           ),
@@ -559,12 +652,14 @@ class _PendingRequestsList extends StatelessWidget {
     required this.onCancel,
     required this.onViewOnMap,
     required this.onRefresh,
+    required this.onChat,
   });
   final Stream<List<Map<String, dynamic>>> stream;
   final Function(Map<String, dynamic>) onAccept;
   final Function(Map<String, dynamic>) onCancel;
   final Function(Map<String, dynamic>) onViewOnMap;
   final Future<void> Function() onRefresh;
+  final Function(Map<String, dynamic>) onChat;
 
   @override
   Widget build(BuildContext context) {
@@ -601,6 +696,7 @@ class _PendingRequestsList extends StatelessWidget {
               onAccept: onAccept,
               onCancel: onCancel,
               onViewOnMap: onViewOnMap,
+              onChat: onChat,
             ),
           ),
         );
@@ -616,6 +712,8 @@ class _AcceptedRequestsList extends StatelessWidget {
     required this.onComplete,
     required this.onViewOnMap,
     required this.onRefresh,
+    required this.onCall,
+    required this.onChat,
   });
 
   final Stream<List<Map<String, dynamic>>> stream;
@@ -623,6 +721,8 @@ class _AcceptedRequestsList extends StatelessWidget {
   final Function(Map<String, dynamic>) onComplete;
   final Function(Map<String, dynamic>) onViewOnMap;
   final Future<void> Function() onRefresh;
+  final Function(Map<String, dynamic>) onCall;
+  final Function(Map<String, dynamic>) onChat;
 
   @override
   Widget build(BuildContext context) {
@@ -659,6 +759,8 @@ class _AcceptedRequestsList extends StatelessWidget {
               onCancel: onCancel,
               onComplete: onComplete,
               onViewOnMap: onViewOnMap,
+              onCall: onCall,
+              onChat: onChat,
             ),
           ),
         );
@@ -675,6 +777,8 @@ class _RequestCard extends StatelessWidget {
     this.onCancel,
     this.onComplete,
     this.onViewOnMap,
+    this.onCall,
+    this.onChat,
   });
 
   final Map<String, dynamic> request;
@@ -683,6 +787,8 @@ class _RequestCard extends StatelessWidget {
   final Function(Map<String, dynamic>)? onCancel;
   final Function(Map<String, dynamic>)? onComplete;
   final Function(Map<String, dynamic>)? onViewOnMap;
+  final Function(Map<String, dynamic>)? onCall;
+  final Function(Map<String, dynamic>)? onChat;
 
   @override
   Widget build(BuildContext context) {
@@ -714,29 +820,21 @@ class _RequestCard extends StatelessWidget {
             ],
             const SizedBox(height: 12),
             if (isPending)
-              // --- UI FIX IS HERE ---
-              // Replaced Row with Wrap to prevent overflow
               Wrap(
                 alignment: WrapAlignment.end,
-                spacing: 8.0, // Horizontal space between buttons
-                runSpacing: 4.0, // Vertical space if buttons wrap
+                spacing: 8.0,
+                runSpacing: 4.0,
                 children: [
-                  // Kept the Cancel button
                   TextButton.icon(
                     onPressed: () => onCancel?.call(request),
                     icon: const Icon(Icons.close),
                     label: const Text('Cancel'),
                     style: TextButton.styleFrom(foregroundColor: Colors.grey[700]),
                   ),
-                  // Added the View Map button
                   OutlinedButton.icon(
                     onPressed: () => onViewOnMap?.call(request),
                     icon: const Icon(Icons.map_outlined),
                     label: const Text('Map'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Theme.of(context).primaryColor,
-                      side: BorderSide(color: Theme.of(context).primaryColor),
-                    ),
                   ),
                   ElevatedButton.icon(
                     onPressed: () => onAccept?.call(request),
@@ -746,35 +844,41 @@ class _RequestCard extends StatelessWidget {
                 ],
               )
             else if (request['status'] == 'accepted')
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              Wrap( 
+                alignment: WrapAlignment.end,
+                spacing: 8.0,
+                runSpacing: 4.0,
                 children: [
-                  Expanded(
-                    child: TextButton.icon(
-                      onPressed: () => onCancel?.call(request),
-                      icon: const Icon(Icons.cancel),
-                      label: const Text('Cancel'),
-                      style: TextButton.styleFrom(foregroundColor: Colors.red),
-                    ),
+                  TextButton.icon(
+                    onPressed: () => onCancel?.call(request),
+                    icon: const Icon(Icons.cancel, size: 18),
+                    label: const Text('Cancel'),
+                    style: TextButton.styleFrom(foregroundColor: Colors.red),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () => onComplete?.call(request),
-                      icon: const Icon(Icons.done_all),
-                      label: const Text('Done'),
-                    ),
+                  TextButton.icon(
+                    onPressed: () => onViewOnMap?.call(request),
+                    icon: const Icon(Icons.navigation_outlined, size: 18),
+                    label: const Text('Navigate'),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextButton.icon(
-                      onPressed: () => onViewOnMap?.call(request),
-                      icon: const Icon(Icons.navigation_outlined),
-                      label: const Text('Navigate'), // Changed text to "Navigate"
-                    ),
+                  TextButton.icon(
+                    onPressed: () => onChat?.call(request),
+                    icon: const Icon(Icons.chat_bubble_outline, size: 18),
+                    label: const Text('Chat'),
+                    style: TextButton.styleFrom(foregroundColor: Colors.blue[700]),
+                  ),
+                  TextButton.icon(
+                    onPressed: () => onCall?.call(request),
+                    icon: const Icon(Icons.call_outlined, size: 18),
+                    label: const Text('Call'),
+                    style: TextButton.styleFrom(foregroundColor: Colors.green[700]),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: () => onComplete?.call(request),
+                    icon: const Icon(Icons.done_all, size: 18),
+                    label: const Text('Done'),
                   ),
                 ],
-              ),
+              )
           ],
         ),
       ),

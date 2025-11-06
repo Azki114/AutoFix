@@ -1,6 +1,5 @@
 // lib/screens/register_screen.dart
 import 'dart:convert'; // For JSON decoding
-// NEW: Import for File
 import 'package:flutter/material.dart';
 import 'package:autofix/main.dart' as app_nav;
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -252,6 +251,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       if (user == null) {
         _showSnackBar('Registration failed: User account could not be created.', Colors.red);
+        setState(() => _isRegistering = false);
         return;
       }
 
@@ -262,6 +262,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       if (idFilePath == null) {
         _showSnackBar('Failed to upload ID. Registration cancelled.', Colors.red);
         await _rollbackRegistration(userId, registeredAccountType, uploadedFilePaths);
+        setState(() => _isRegistering = false);
         return;
       }
       uploadedFilePaths.add(idFilePath);
@@ -273,6 +274,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         if (certFilePath == null) {
           _showSnackBar('Failed to upload certificate. Registration cancelled.', Colors.red);
           await _rollbackRegistration(userId, registeredAccountType, uploadedFilePaths);
+          setState(() => _isRegistering = false);
           return;
         }
         uploadedFilePaths.add(certFilePath);
@@ -282,6 +284,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       await app_nav.supabase.from('profiles').insert({
         'id': userId,
         'full_name': fullName,
+        'email': email, // Save the email
         'phone_number': phoneNumber,
         'role': _selectedAccountType == AccountType.driver ? 'driver' : 'mechanic',
         'valid_id_url': idFilePath, // NEW: Save the ID file path
@@ -317,7 +320,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
       _showSnackBar('Registration successful! Please wait for admin verification.', Colors.green);
       _resetForm();
-      if (mounted) Navigator.pushReplacementNamed(context, '/login');
 
     } on AuthException catch (e) {
       _showSnackBar('Authentication error: ${e.message}', Colors.red);
@@ -328,9 +330,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _showSnackBar('An unexpected error occurred: ${e.toString()}', Colors.red);
       await _rollbackRegistration(userId, registeredAccountType, uploadedFilePaths);
     } finally {
-      setState(() {
-        _isRegistering = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isRegistering = false;
+        });
+      }
     }
   }
 
@@ -596,7 +600,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         color: isUploaded ? Colors.green : Colors.black54,
       ),
       label: Text(
-        isUploaded ? file.name.split('/').last : title,
+        isUploaded ? file!.name.split('/').last : title,
         style: TextStyle(
           color: isUploaded ? Colors.green : Colors.black54,
           overflow: TextOverflow.ellipsis,
