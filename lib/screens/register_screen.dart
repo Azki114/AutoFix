@@ -600,7 +600,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         color: isUploaded ? Colors.green : Colors.black54,
       ),
       label: Text(
-        isUploaded ? file!.name.split('/').last : title,
+        isUploaded ? file.name.split('/').last : title,
         style: TextStyle(
           color: isUploaded ? Colors.green : Colors.black54,
           overflow: TextOverflow.ellipsis,

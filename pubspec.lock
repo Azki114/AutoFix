@@ -1825,28 +1825,28 @@ packages:
     dependency: transitive
     description:
       name: zego_plugin_adapter
-      sha256: "8b2aad4f8215a064db337a6444c0791f0e3a533a7171f4d573e6f528948b8900"
+      sha256: c574b0e71c9221a92a584f96f04437505b46f028c80abac2ab887c3bde64c0f6
       url: "https://pub.dev"
     source: hosted
-    version: "2.14.0"
+    version: "2.14.1"
   zego_uikit:
     dependency: transitive
     description:
       name: zego_uikit
-      sha256: "2f31284b1ed7e254ca6399a2afa330aefe96318fded2f39c4a7f1a2afd113860"
+      sha256: "3aa506e98801c8da1bfa13fde392422094ab3f39d26b7c5d61aa9e86850a5e01"
       url: "https://pub.dev"
     source: hosted
-    version: "2.28.32"
+    version: "2.28.33"
   zego_uikit_prebuilt_call:
     dependency: "direct main"
     description:
       name: zego_uikit_prebuilt_call
-      sha256: "27f0df30b82ff9e73abfac3312994a68a5720e707aa813dc1000abd0a317cd53"
+      sha256: "2697a53fc94e168243760747086e11a070c12f0b42d2d6bc87afa457eeee6436"
       url: "https://pub.dev"
     source: hosted
-    version: "4.21.0"
+    version: "4.21.1"
   zego_uikit_signaling_plugin:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: zego_uikit_signaling_plugin
       sha256: "6c0d823dff640f350f692a9d753fe4d1d9ad4423db11022dd53d43b6f2ec92c2"
