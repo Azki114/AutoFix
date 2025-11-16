@@ -21,7 +21,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:autofix/screens/reset_password_screen.dart'; 
+import 'package:autofix/screens/reset_password_screen.dart';
 import 'package:autofix/screens/pending_verification_screen.dart';
 
 class UserProfile {
@@ -96,10 +96,12 @@ class _MyAppState extends State<MyApp> {
         userRole.value = null;
         userProfileNotifier.value = null; 
         _stopListeningForRequests();
+
+        // Zego uninit removed
+
         navigatorKey.currentState
             ?.pushNamedAndRemoveUntil('/login', (route) => false);
       } else if (event == AuthChangeEvent.signedIn) {
-        // --- THIS IS THE FIX (PART 1) ---
         // This is a new sign-up OR login.
         // Add a small delay to win the race condition against the register screen.
         Future.delayed(const Duration(milliseconds: 1000), () {
@@ -130,16 +132,12 @@ class _MyAppState extends State<MyApp> {
       return;
     }
     try {
-      // --- THIS IS THE FIX (PART 2) ---
-      // Change .single() to .maybeSingle() to prevent "0 rows" crash.
       final response = await supabase
           .from('profiles')
           .select('role, full_name, avatar_url, is_verified')
           .eq('id', userId)
-          .maybeSingle(); // <-- THE FIX
+          .maybeSingle(); 
 
-      // --- THIS IS THE FIX (PART 3) ---
-      // Handle the case where the profile doesn't exist yet
       if (response == null) {
         // This means the profile is still being created (the 1-sec delay wasn't enough).
         // Log them out and ask them to log in again.
@@ -167,6 +165,8 @@ class _MyAppState extends State<MyApp> {
         navigatorKey.currentState?.pushNamedAndRemoveUntil('/pending-verification', (route) => false);
         return; // Stop here. Do not proceed.
       }
+      
+      // Zego init() block removed from here
       
       if (response['role'] != null) {
         final role = response['role'] as String;
@@ -243,6 +243,7 @@ class _MyAppState extends State<MyApp> {
 
   @override
   Widget build(BuildContext context) {
+
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       scaffoldMessengerKey: snackbarKey,
@@ -252,6 +253,9 @@ class _MyAppState extends State<MyApp> {
         primarySwatch: Colors.blue,
         visualDensity: VisualDensity.adaptivePlatformDensity,
       ),
+
+      // --- Zego Builder has been REMOVED ---
+      
       initialRoute: '/',
       routes: {
         '/': (context) => const SplashScreen(),
@@ -454,7 +458,7 @@ class NavigationDrawer extends StatelessWidget {
                     title: const Text('Settings'),
                     onTap: () {
                       Navigator.pop(context);
-      
+                  
                       Navigator.pushReplacementNamed(context, '/settings');
                     },
                   ),

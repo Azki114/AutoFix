@@ -5,6 +5,11 @@
 	<key>NSCameraUsageDescription</key>
 	<string>We need camera access for video calls.</string>
 	<key>NSMicrophoneUsageDescription</key>
+	<string>We need microphone access for audio and video calls.</string>
+
+	<key>NSCameraUsageDescription</key>
+	<string>We need camera access for video calls.</string>
+	<key>NSMicrophoneUsageDescription</key>
 	<string>We need microphone access for audio calls.</string>
 	
 	<key>CFBundleDevelopmentRegion</key>
